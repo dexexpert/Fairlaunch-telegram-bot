@@ -18,12 +18,67 @@ const HDWalletProvider = require("@truffle/hdwallet-provider");
 // ERC-20 Token ABI with only the necessary parts for fetching name and symbol
 
 const factoryAddress = {
-  Binance: "0x0c4385B14D9FB669750b3118c11BBcF1e11330c0",
-  Ethereum: "0x7b4d204D50ae503985F89245501c6a48574309F4",
+  Binance: "0xc563971e19bfc8C6aFDB64c8853127eF9b25AFc8",
+  Ethereum: "0xEc0621b3c82E0921DFF4e2E6F9f415dB42666368",
 };
 
 const { Bot, InlineKeyboard } = require("grammy");
 const { Menu } = require("@grammyjs/menu");
+const mongoose = require("mongoose");
+const mongoUri = "mongodb://localhost:27017/Fairlaunch";
+
+mongoose
+  .connect(mongoUri, { useNewUrlParser: true, useUnifiedTopology: true })
+  .then(() => {
+    console.log("Connected successfully to MongoDB");
+  })
+  .catch((err) => {
+    console.error("MongoDB connection failed", err);
+  });
+
+const Schema = mongoose.Schema;
+
+const poolInfoSchema = new Schema({
+  poolAddress: String,
+  deployerAddress: String,
+  deployerUsername: String,
+  token_address: String,
+  token_name: String,
+  token_symbol: String,
+  accepted_currency: String,
+  chain: String,
+  sellAmount: Number,
+  softcap: Number,
+  minimumBuyAmount: Number,
+  maximumBuyAmount: Number,
+  whitelist_enabled: Boolean,
+  referralEnabled: Boolean,
+  router: String,
+  refundType: String,
+  liquidityPercentage: Number,
+  startTime: Number,
+  endTime: Number,
+  lockupPeriod: Number,
+  logoURL: String,
+  websiteURL: String,
+  twitterURL: String,
+  telegramURL: String,
+  facebookURL: String,
+  discordURL: String,
+  githubURL: String,
+  instagramURL: String,
+  redditURL: String,
+  preview: String,
+  description: String,
+});
+
+const ownerInfoSchema = new Schema({
+  ownerUsername: String,
+  ownerWallets: [String],
+});
+
+const PoolInfo = mongoose.model("PoolInfo", poolInfoSchema);
+const OwnerInfo = mongoose.model("OwnerInfo", ownerInfoSchema);
 
 const bot = new Bot(process.env.BOT_TOKEN);
 
@@ -273,6 +328,7 @@ function getSession(userId) {
     };
 
     sessions[userId].maximumBuyAmount.validation = (val) => {
+      if (val === undefined) return true;
       if (isNumber(val)) {
         return val === 0 || val > sessions[userId].minimumBuyAmount.value;
       }
@@ -355,7 +411,7 @@ async function initiateOwnerMenu(submenu, menuData, stackedMenus) {
               (ctx) => {
                 const session = getSession(ctx.from.id);
                 session.isExpectingAnswer = "";
-                if(session[item.variable].value !== selectOption){
+                if (session[item.variable].value !== selectOption) {
                   session[item.variable].value = selectOption;
                   ctx.menu.update();
                 }
@@ -463,6 +519,217 @@ async function initiateOwnerMenu(submenu, menuData, stackedMenus) {
                       reply_markup: inlineKeyboard,
                     });
                   }
+                } else if (item.name === "ongoing-presales") {
+                  const session = getSession(ctx.from.id);
+                  if (session.wallets.length === 0) {
+                    ctx.reply(
+                      "⛔️ No wallets selected and can't load your presale info"
+                    );
+                  } else {
+                    const inlineKeyboard = {
+                      inline_keyboard: [
+                        [
+                          // { text: "Button 1", callback_data: "data_1" },
+                          // { text: "Button 2", callback_data: "data_2" },
+                        ],
+                      ],
+                    };
+                    const currentWallet =
+                      session.wallets[session.selectedWallet - 1];
+                    PoolInfo.find({ deployerAddress: currentWallet })
+                      .then((pools) => {
+                        const timestampInSeconds = Math.floor(
+                          Date.now() / 1000
+                        );
+                        for (const pool of pools) {
+                          if (
+                            timestampInSeconds > pool.startTime &&
+                            timestampInSeconds < pool.endTime
+                          ) {
+                            inlineKeyboard.inline_keyboard[0].push({
+                              text: pool.token_name,
+                              callback_data: "ongoing" + pool.poolAddress,
+                            });
+                          }
+                        }
+                        console.log(pools);
+                        if (pools.length > 0) {
+                          ctx.reply(
+                            "Please make changes to your ongoing presale",
+                            { reply_markup: inlineKeyboard }
+                          );
+                        } else {
+                          ctx.reply("⚠️ No ongoing presale at the moment");
+                        }
+                      })
+                      .catch((err) => console.log(err));
+                  }
+                } else if (item.name === "finished-presales") {
+                  const session = getSession(ctx.from.id);
+                  if (session.wallets.length === 0) {
+                    ctx.reply(
+                      "⛔️ No wallets selected and can't load your presale info"
+                    );
+                  } else {
+                    const inlineKeyboard = {
+                      inline_keyboard: [
+                        [
+                          // { text: "Button 1", callback_data: "data_1" },
+                          // { text: "Button 2", callback_data: "data_2" },
+                        ],
+                      ],
+                    };
+                    const currentWallet =
+                      session.wallets[session.selectedWallet - 1];
+                    PoolInfo.find({ deployerAddress: currentWallet })
+                      .then((pools) => {
+                        const timestampInSeconds = Math.floor(
+                          Date.now() / 1000
+                        );
+                        for (const pool of pools) {
+                          if (timestampInSeconds > pool.endTime) {
+                            inlineKeyboard.inline_keyboard[0].push({
+                              text: pool.token_name,
+                              callback_data: "finished" + pool.poolAddress,
+                            });
+                          }
+                        }
+                        if (pools.length > 0) {
+                          ctx.reply(
+                            "Please make changes to your finished presale",
+                            { reply_markup: inlineKeyboard }
+                          );
+                        } else {
+                          ctx.reply("⚠️ No finished presale at the moment");
+                        }
+                      })
+                      .catch((err) => console.log(err));
+                  }
+                } else if (item.name === "claim-settings") {
+                  const session = getSession(ctx.from.id);
+                  if (session.wallets.length === 0) {
+                    ctx.reply(
+                      "⛔️ No wallets selected and can't load your presale info"
+                    );
+                  } else {
+                    const inlineKeyboard = {
+                      inline_keyboard: [
+                        [
+                          // { text: "Button 1", callback_data: "data_1" },
+                          // { text: "Button 2", callback_data: "data_2" },
+                        ],
+                      ],
+                    };
+                    const currentWallet =
+                      session.wallets[session.selectedWallet - 1];
+                    PoolInfo.find({ deployerAddress: currentWallet })
+                      .then((pools) => {
+                        const timestampInSeconds = Math.floor(
+                          Date.now() / 1000
+                        );
+                        for (const pool of pools) {
+                          if (timestampInSeconds < pool.endTime) {
+                            inlineKeyboard.inline_keyboard[0].push({
+                              text: pool.token_name,
+                              callback_data: "claim" + pool.poolAddress,
+                            });
+                          }
+                        }
+                        if (pools.length > 0) {
+                          ctx.reply("Please make changes to claim settings", {
+                            reply_markup: inlineKeyboard,
+                          });
+                        } else {
+                          ctx.reply("⚠️ No presales to edit claim settings");
+                        }
+                      })
+                      .catch((err) => console.log(err));
+                  }
+                } else if (item.name === "refund-menu") {
+                  const session = getSession(ctx.from.id);
+                  if (session.wallets.length === 0) {
+                    ctx.reply(
+                      "⛔️ No wallets selected and can't load your presale info"
+                    );
+                  } else {
+                    const inlineKeyboard = {
+                      inline_keyboard: [
+                        [
+                          // { text: "Button 1", callback_data: "data_1" },
+                          // { text: "Button 2", callback_data: "data_2" },
+                        ],
+                      ],
+                    };
+                    const currentWallet =
+                      session.wallets[session.selectedWallet - 1];
+                    PoolInfo.find({ deployerAddress: currentWallet })
+                      .then((pools) => {
+                        const timestampInSeconds = Math.floor(
+                          Date.now() / 1000
+                        );
+                        for (const pool of pools) {
+                          if (timestampInSeconds > pool.endTime) {
+                            inlineKeyboard.inline_keyboard[0].push({
+                              text: pool.token_name,
+                              callback_data: "refund" + pool.poolAddress,
+                            });
+                          }
+                        }
+                        if (pools.length > 0) {
+                          ctx.reply(
+                            "Please make changes to your finished presale",
+                            { reply_markup: inlineKeyboard }
+                          );
+                        } else {
+                          ctx.reply(
+                            "⚠️ No finished presale to refund at the moment"
+                          );
+                        }
+                      })
+                      .catch((err) => console.log(err));
+                  }
+                } else if (item.name === "finalize-presale") {
+                  const session = getSession(ctx.from.id);
+                  if (session.wallets.length === 0) {
+                    ctx.reply(
+                      "⛔️ No wallets selected and can't load your presale info"
+                    );
+                  } else {
+                    const inlineKeyboard = {
+                      inline_keyboard: [
+                        [
+                          // { text: "Button 1", callback_data: "data_1" },
+                          // { text: "Button 2", callback_data: "data_2" },
+                        ],
+                      ],
+                    };
+                    const currentWallet =
+                      session.wallets[session.selectedWallet - 1];
+                    PoolInfo.find({ deployerAddress: currentWallet })
+                      .then((pools) => {
+                        const timestampInSeconds = Math.floor(
+                          Date.now() / 1000
+                        );
+                        for (const pool of pools) {
+                          if (timestampInSeconds > pool.endTime) {
+                            inlineKeyboard.inline_keyboard[0].push({
+                              text: pool.token_name,
+                              callback_data: "finalize" + pool.poolAddress,
+                            });
+                          }
+                        }
+                        if (pools.length > 0) {
+                          ctx.reply("Please finalize your finished presale", {
+                            reply_markup: inlineKeyboard,
+                          });
+                        } else {
+                          ctx.reply(
+                            "⚠️ No finished presale to finalize at the moment"
+                          );
+                        }
+                      })
+                      .catch((err) => console.log(err));
+                  }
                 } else {
                   ctx.reply(`Running!`, { reply_markup: main });
                 }
@@ -498,9 +765,29 @@ const providerURL = {
   Ethereum: "https://goerli.infura.io/v3/81f1f856e5854cda96f939fe2a658c40",
 };
 
+async function waitForTransactionReceipt(txHash) {
+  return new Promise((resolve, reject) => {
+    const interval = setInterval(async () => {
+      try {
+        const receipt = await web3.eth.getTransactionReceipt(txHash);
+        if (receipt && receipt.status === true) {
+          clearInterval(interval);
+          resolve(receipt);
+        } else if (receipt && receipt.status === false) {
+          clearInterval(interval);
+          reject(new Error("Transaction has failed."));
+        }
+      } catch (error) {
+        clearInterval(interval);
+        reject(error);
+      }
+    }, 5000); // Check every 5 seconds. You can adjust this value.
+  });
+}
+
 // Your private key (make sure not to expose this in your code or anywhere public)
 
-async function launchPool(privateKey, session) {
+async function launchPool(privateKey, session, username) {
   try {
     // Setup provider with the private key
     const provider = new HDWalletProvider({
@@ -556,6 +843,61 @@ async function launchPool(privateKey, session) {
         .send({ from: sender, value: "10000000000000000" });
 
       console.log(response);
+      waitForTransactionReceipt(response.transactionHash)
+        .then((receipt) => {
+          console.log("Transaction confirmed", receipt);
+          const event = receipt.events.poolCreated;
+          if (event) {
+            const poolAddress = event.returnValues.poolAddress;
+            const newPoolInfo = new PoolInfo({
+              poolAddress,
+              deployerAddress: sender,
+              deployerUsername: username,
+              token_address: session.token_address,
+              token_name: session.token_name,
+              token_symbol: session.token_symbol,
+              accepted_currency: session.accepted_currency,
+              chain: session.chain,
+              sellAmount:
+                session.sellAmount === undefined ? 0 : session.sellAmount,
+              softcap: session.softcap === undefined ? 0 : session.softcap,
+              minimumBuyAmount:
+                session.minimumBuyAmount === undefined
+                  ? 0
+                  : session.minimumBuyAmount,
+              maximumBuyAmount:
+                session.maximumBuyAmount === undefined
+                  ? 0
+                  : session.maximumBuyAmount,
+              whitelist_enabled: session.whitelist_enabled,
+              referralEnabled: session.referralEnabled,
+              router: session.router,
+              refundType: session.refundType,
+              liquidityPercentage: session.liquidityPercentage,
+              startTime: session.startTime,
+              endTime: session.endTime,
+              lockupPeriod: session.lockupPeriod,
+              logoURL: session.logoURL,
+              websiteURL: session.websiteURL,
+              twitterURL: session.twitterURL,
+              telegramURL: session.telegramURL,
+              facebookURL: session.facebookURL,
+              discordURL: session.discordURL,
+              githubURL: session.githubURL,
+              instagramURL: session.instagramURL,
+              redditURL: session.redditURL,
+              preview: session.preview,
+              description: session.description,
+            });
+            newPoolInfo
+              .save()
+              .then((doc) => console.log(`Pool Info saved ${username}`, doc))
+              .catch((err) =>
+                console.log(`${username} Pool Info save failed`, err)
+              );
+          }
+        })
+        .catch((err) => console.log(err.message));
       // Close the provider
       provider.engine.stop();
     }, 10000);
@@ -593,10 +935,24 @@ async function mainFunc() {
 
     bot.command("start", (ctx) => {
       console.log(ctx.from.username);
+      OwnerInfo.findOne({ ownerUsername: ctx.from.username })
+        .then((ownerInfo) => {
+          console.log(`ownerInfo : ${ownerInfo}`);
+          const session = getSession(ctx.from.id);
+          session.wallets = ownerInfo.ownerWallets;
+        })
+        .catch((err) => console.log(err));
       ctx.reply("Main Menu:", { reply_markup: main });
     });
     bot.command("ownermenu", (ctx) => {
       console.log("owner menu : ", ctx.from.username);
+      OwnerInfo.findOne({ ownerUsername: ctx.from.username })
+        .then((ownerInfo) => {
+          console.log(`ownerInfo : ${ownerInfo}`);
+          const session = getSession(ctx.from.id);
+          session.wallets = ownerInfo.ownerWallets;
+        })
+        .catch((err) => console.log(err));
       ctx.reply("Owner Menu:", { reply_markup: ownerMenu });
     });
     bot.command("usermenu", (ctx) => {
@@ -665,10 +1021,42 @@ async function mainFunc() {
           if (session[session.isExpectingAnswer].validation(answer)) {
             session[session.isExpectingAnswer].value = answer;
             if (session.isExpectingAnswer === "importedWallet") {
-              console.log(answer);
               if (!session.wallets.includes(answer)) {
                 session.wallets.push(answer);
               }
+              OwnerInfo.findOne({ ownerUsername: ctx.from.username })
+                .then((info) => {
+                  if (info.length > 0) {
+                    OwnerInfo.updateOne(info, { ownerWallets: session.wallets })
+                      .then((res) => {
+                        console.log(`Update Owner ${ctx.from.username}`, res);
+                      })
+                      .catch((err) =>
+                        console.log(
+                          `Fail Owner Update ${ctx.from.username}`,
+                          err
+                        )
+                      );
+                  } else {
+                    const newOwner = new OwnerInfo({
+                      ownerUsername: ctx.from.username,
+                      ownerWallets: session.wallets,
+                    });
+                    newOwner
+                      .save()
+                      .then((doc) => {
+                        console.log(`New Owner ${ctx.from.username} saved`);
+                      })
+                      .catch((err) => {
+                        console.log(
+                          `New Owner ${ctx.from.username} save failed!!!`
+                        );
+                      });
+                  }
+                })
+                .catch((err) => {
+                  console.log("Owner find", err);
+                });
               ctx.reply(`Wallet Successfuly Imported`);
             } else {
               const reviewKeyboard = new InlineKeyboard()
@@ -755,11 +1143,22 @@ async function mainFunc() {
           const session = getSession(ctx.from.id);
           session.selectedWallet = parseInt(parts[1]);
           // Replace 'yourPrivateKeyHex' with your actual private key in hexadecimal format.
-          console.log(session.wallets[session.selectedWallet - 1]);
 
           const addressHex = getCurrentWalletPublicKey(session);
 
           ctx.reply("Current Wallet's Information : " + addressHex);
+        }
+      } else if (data.startsWith("ongoing")) {
+        const parts = data.split("ongoing");
+        if (parts.length > 1) {
+          const poolAddress = parts[1];
+          ctx.reply(`The ongoing pool is ${poolAddress}`);
+        }
+      } else if (data.startsWith("finished")) {
+        const parts = data.split("finished");
+        if (parts.length > 1) {
+          const poolAddress = parts[1];
+          ctx.reply(`The finished pool is ${poolAddress}`);
         }
       }
     });
