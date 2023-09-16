@@ -730,6 +730,84 @@ async function initiateOwnerMenu(submenu, menuData, stackedMenus) {
                       })
                       .catch((err) => console.log(err));
                   }
+                } else if (item.name === "find-project") {
+                  const session = getSession(ctx.from.id);
+                  session.isExpectingAnswer = "find-project";
+                  ctx.reply(
+                    "Search contract address, please input presale address."
+                  );
+                } else if (item.name === "search") {
+                  const session = getSession(ctx.from.id);
+                  session.isExpectingAnswer = "search";
+                  ctx.reply(
+                    "Search contract address, please input token address."
+                  );
+                } else if (item.name === "live-presales") {
+                  const inlineKeyboard = {
+                    inline_keyboard: [
+                      [
+                        // { text: "Button 1", callback_data: "data_1" },
+                        // { text: "Button 2", callback_data: "data_2" },
+                      ],
+                    ],
+                  };
+                  PoolInfo.find({})
+                    .then((pools) => {
+                      const timestampInSeconds = Math.floor(Date.now() / 1000);
+                      for (const pool of pools) {
+                        if (
+                          timestampInSeconds > pool.startTime &&
+                          timestampInSeconds < pool.endTime
+                        ) {
+                          inlineKeyboard.inline_keyboard[0].push({
+                            text: pool.token_name,
+                            callback_data: "live" + pool.poolAddress,
+                          });
+                        }
+                      }
+                      console.log(pools);
+                      if (pools.length > 0) {
+                        ctx.reply("All live presales : ", {
+                          reply_markup: inlineKeyboard,
+                        });
+                      } else {
+                        ctx.reply("⚠️ No live presales at the moment");
+                      }
+                    })
+                    .catch((err) => console.log(err));
+                } else if (item.name === "upcoming-presales") {
+                  const inlineKeyboard = {
+                    inline_keyboard: [
+                      [
+                        // { text: "Button 1", callback_data: "data_1" },
+                        // { text: "Button 2", callback_data: "data_2" },
+                      ],
+                    ],
+                  };
+                  PoolInfo.find({})
+                    .then((pools) => {
+                      const timestampInSeconds = Math.floor(Date.now() / 1000);
+                      for (const pool of pools) {
+                        if (
+                          timestampInSeconds < pool.startTime &&
+                          timestampInSeconds < pool.endTime
+                        ) {
+                          inlineKeyboard.inline_keyboard[0].push({
+                            text: pool.token_name,
+                            callback_data: "upcoming" + pool.poolAddress,
+                          });
+                        }
+                      }
+                      console.log(pools);
+                      if (pools.length > 0) {
+                        ctx.reply("All upcoming presales : ", {
+                          reply_markup: inlineKeyboard,
+                        });
+                      } else {
+                        ctx.reply("⚠️ No upcoming presales at the moment");
+                      }
+                    })
+                    .catch((err) => console.log(err));
                 } else {
                   ctx.reply(`Running!`, { reply_markup: main });
                 }
@@ -975,12 +1053,68 @@ async function mainFunc() {
             const date = new Date(answer);
             answer = Math.floor(date.getTime() / 1000);
           } else {
-            ctx.reply("please input valid date again YYYY-MM-DD HH:MM:SS");
+            ctx.reply("⚠️ please input valid date again YYYY-MM-DD HH:MM:SS");
             return;
           }
-        }
-
-        if (session.isExpectingAnswer === "token_address") {
+        } else if (session.isExpectingAnswer === "find-project") {
+          if (isValidEthereumAddress(answer) == true) {
+            session.isExpectingAnswer = "";
+            PoolInfo.find({ poolAddress: answer })
+              .then((pools) => {
+                if (pools === null || pools.length === 0) {
+                  ctx.reply("⚠️ No result!");
+                } else {
+                  for (const pool of pools) {
+                    const returnText = `Overview of Token\n
+                    <b>Project Description</b>: ${pool.description}\n
+                    <b>Token Metrics</b>: ${pool.token_name} ${pool.token_symbol}\n
+                    <b>Presale Goals</b>: ${pool.softcap}${pool.accepted_currency}\n
+                    <b>Presale Stats</b>: \n
+                    <b>Post Presale Actions</b>: ${pool.router}\n
+                    <b>Links Media</b>: ${pool.websiteURL}\n
+                    <b>Presale Time</b>: ${pool.startTime} - ${pool.endTime}\n
+                    <b>Current Marketcap</b>: \n
+                    <b>Your contributions</b>" \n`;
+                    ctx.reply(returnText);
+                  }
+                }
+              })
+              .catch((err) => {
+                console.log(err);
+              });
+          } else {
+            ctx.reply("⚠️ Please input valid address again");
+          }
+        } else if (session.isExpectingAnswer === "search") {
+          if (isValidEthereumAddress(answer) == true) {
+            session.isExpectingAnswer = "";
+            PoolInfo.find({ token_address: answer })
+              .then((pools) => {
+                if (pools === null || pools.length === 0) {
+                  ctx.reply("⚠️ No result!");
+                } else {
+                  for (const pool of pools) {
+                    const returnText = `Overview of Token\n
+                    <b>Project Description</b>: ${pool.description}\n
+                    <b>Token Metrics</b>: ${pool.token_name} ${pool.token_symbol}\n
+                    <b>Presale Goals</b>: ${pool.softcap}${pool.accepted_currency}\n
+                    <b>Presale Stats</b>: \n
+                    <b>Post Presale Actions</b>: ${pool.router}\n
+                    <b>Links Media</b>: ${pool.websiteURL}\n
+                    <b>Presale Time</b>: ${pool.startTime} - ${pool.endTime}\n
+                    <b>Current Marketcap</b>: \n
+                    <b>Your contributions</b>" \n`;
+                    ctx.reply(returnText);
+                  }
+                }
+              })
+              .catch((err) => {
+                console.log(err);
+              });
+          } else {
+            ctx.reply("⚠️ Please input valid address again");
+          }
+        } else if (session.isExpectingAnswer === "token_address") {
           if (isValidEthereumAddress(answer) == true) {
             const web3 = new Web3(providerURL[session.chain.value]);
             const tokenAddress = answer;
@@ -1011,11 +1145,11 @@ async function mainFunc() {
             } catch (err) {
               console.log(err);
               ctx.reply(
-                "Can't load token info on bsc testnet, please input again"
+                "⚠️ Can't load token info on bsc testnet, please input again"
               );
             }
           } else {
-            ctx.reply("please input valid address again");
+            ctx.reply("⚠️ please input valid address again");
           }
         } else {
           if (session[session.isExpectingAnswer].validation(answer)) {

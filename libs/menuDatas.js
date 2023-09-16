@@ -176,30 +176,11 @@ const userMenuData = [
         text: "Live Presales",
         name: "live-presales",
         isRow: true,
-        submenu: [
-          { text: "1. Project 1", name: "live-project1", isRow: true },
-          { text: "2. Project 2", name: "live-project2", isRow: true },
-          {
-            text: "3. Project 3",
-            name: "live-project3",
-            isRow: true,
-            isLast: true,
-          },
-        ],
       },
       {
         text: "Upcoming Presales",
         name: "upcoming-presales",
-        submenu: [
-          { text: "1. Project 1", name: "upcoming-project1", isRow: true },
-          { text: "2. Project 2", name: "upcoming-project2", isRow: true },
-          {
-            text: "3. Project 3",
-            name: "upcoming-project3",
-            isRow: true,
-            isLast: true,
-          },
-        ],
+        
         isLast: true,
       },
     ],
@@ -219,38 +200,13 @@ const userMenuData = [
       },
       {
         text: "Import Wallet",
-        name: "import-user-wallet",
-        submenu: [
-          {
-            text: "Import The Wallet by Pasting the PK",
-            name: "import-wallet-by-pk",
-            isRow: true,
-            isLast: true,
-          },
-        ],
+        name: "import-wallet",
+        variable: "importedWallet",
       },
       {
         text: "Manage Wallets",
-        name: "manage-user-wallet",
+        name: "manage-wallet",
         isRow: true,
-        submenu: [
-          {
-            text: "Wallet 1",
-            name: "user-wallet1",
-            isRow: true,
-          },
-          {
-            text: "Wallet 2",
-            name: "user-wallet2",
-            isRow: true,
-          },
-          {
-            text: "Wallet 3",
-            name: "user-wallet3",
-            isRow: true,
-            isLast: true,
-          },
-        ],
         isLast: true,
       },
     ],
