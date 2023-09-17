@@ -4,6 +4,7 @@ const ethUtil = require("ethereumjs-util");
 const EC = require("elliptic").ec;
 const ec = new EC("secp256k1");
 const factoryABI = require("./abis/factoryABI");
+const fairlaunchAbi = require("./abis/FairLaunch");
 const tokenAbi = require("./abis/tokenAbi");
 const {
   isValidEthereumAddress,
@@ -847,6 +848,14 @@ async function waitForTransactionReceipt(txHash) {
   return new Promise((resolve, reject) => {
     const interval = setInterval(async () => {
       try {
+        // Setup provider with the private key
+        const provider = new HDWalletProvider({
+          privateKeys: [privateKey],
+          providerOrUrl: providerURL[session.chain],
+        });
+
+        const web3 = new Web3(provider);
+
         const receipt = await web3.eth.getTransactionReceipt(txHash);
         if (receipt && receipt.status === true) {
           clearInterval(interval);
@@ -861,6 +870,36 @@ async function waitForTransactionReceipt(txHash) {
       }
     }, 5000); // Check every 5 seconds. You can adjust this value.
   });
+}
+
+async function getPresaleInformation(presale_address, token_address) {
+  try {
+    // Setup provider with the private key
+    const provider = new HDWalletProvider({
+      privateKeys: [privateKey],
+      providerOrUrl: providerURL[session.chain],
+    });
+
+    const web3 = new Web3(provider);
+
+    const presaleContract = new web3.eth.Contract(factoryABI, presale_address);
+    const sellAmount = await presaleContract.methods.sellAmount().call({from : sender});
+    const softCap = await presaleContract.methods.softCap().call({from : sender});
+    const totalRaises = await presaleContract.methods.totalDepositAmount().call({from:sender});
+    const totalContributors = await presaleContract.methods.totalContributors().call({from:sender});
+    const liquidityRatio = await presaleContract.methods.calcCurrentRate().call({from:sender});
+    const marketCap = await presaleContract.methods.calcInitialMarketCapInToken().call({from:sender});
+    return {
+      sellAmount,
+      softCap,
+      totalRaises,
+      totalContributors,
+      liquidityRatio,
+      marketCap
+    };
+  } catch (err) {
+    console.log(err);
+  }
 }
 
 // Your private key (make sure not to expose this in your code or anywhere public)
@@ -882,7 +921,7 @@ async function launchPool(privateKey, session, username) {
     await tokenContract.methods.approve(
       factoryAddress[session.chain],
       "115792089237316195423570985008687907853269984665640564039457"
-    );
+    ).send({from : sender});
     setTimeout(async () => {
       // Create a contract instance
       const contract = new web3.eth.Contract(
@@ -1065,15 +1104,16 @@ async function mainFunc() {
                   ctx.reply("⚠️ No result!");
                 } else {
                   for (const pool of pools) {
+                    const tokenInfomationResult = getPresaleInformation(pool.poolAddress, pool.token_address);
                     const returnText = `Overview of Token\n
                     <b>Project Description</b>: ${pool.description}\n
                     <b>Token Metrics</b>: ${pool.token_name} ${pool.token_symbol}\n
                     <b>Presale Goals</b>: ${pool.softcap}${pool.accepted_currency}\n
-                    <b>Presale Stats</b>: \n
+                    <b>Presale Stats</b>: ${tokenInformation.totalDepositAmount}${pool.accepted_currency} raised, ${tokenInformation.totalContributors} contributors\n
                     <b>Post Presale Actions</b>: ${pool.router}\n
                     <b>Links Media</b>: ${pool.websiteURL}\n
                     <b>Presale Time</b>: ${pool.startTime} - ${pool.endTime}\n
-                    <b>Current Marketcap</b>: \n
+                    <b>Current Marketcap</b>: ${pool.marketCap}\n
                     <b>Your contributions</b>" \n`;
                     ctx.reply(returnText);
                   }
@@ -1096,12 +1136,18 @@ async function mainFunc() {
                   for (const pool of pools) {
                     const returnText = `Overview of Token\n
                     <b>Project Description</b>: ${pool.description}\n
-                    <b>Token Metrics</b>: ${pool.token_name} ${pool.token_symbol}\n
-                    <b>Presale Goals</b>: ${pool.softcap}${pool.accepted_currency}\n
+                    <b>Token Metrics</b>: ${pool.token_name} ${
+                      pool.token_symbol
+                    }\n
+                    <b>Presale Goals</b>: ${pool.softcap}${
+                      pool.accepted_currency
+                    }\n
                     <b>Presale Stats</b>: \n
                     <b>Post Presale Actions</b>: ${pool.router}\n
                     <b>Links Media</b>: ${pool.websiteURL}\n
-                    <b>Presale Time</b>: ${pool.startTime} - ${pool.endTime}\n
+                    <b>Presale Time</b>: ${formatDate(
+                      pool.startTime
+                    )} - ${formatDate(pool.endTime)}\n
                     <b>Current Marketcap</b>: \n
                     <b>Your contributions</b>" \n`;
                     ctx.reply(returnText);
