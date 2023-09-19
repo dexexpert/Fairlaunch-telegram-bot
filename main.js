@@ -314,6 +314,7 @@ function getSession(userId) {
         invalid_description: "Please input valid private key",
       },
       wallets: [],
+      amountToContribute: 0,
       isExpectingAnswer: "",
       selectedWallet: 1,
     };
@@ -445,10 +446,9 @@ async function initiateOwnerMenu(submenu, menuData, stackedMenus) {
                 const launchInlineKeyboard = new InlineKeyboard()
                   .text(`✅ Chain - ${session.chain.value}`, "chainReView")
                   .text(
-                    `${
-                      walletPubKey === ""
-                        ? "🚫 Please import wallet"
-                        : "✅ " + walletPubKey
+                    `${walletPubKey === ""
+                      ? "🚫 Please import wallet"
+                      : "✅ " + walletPubKey
                     }`,
                     "walletReView"
                   )
@@ -474,17 +474,15 @@ async function initiateOwnerMenu(submenu, menuData, stackedMenus) {
                       item.variable === "endTime"
                     ) {
                       ctx.reply(
-                        `Current timestamp is ${
-                          Date.now() / 1000
+                        `Current timestamp is ${Date.now() / 1000
                         }\nPlease input in this format : YYYY-MM-DD HH:MM:SS`
                       );
                     }
                     ctx.reply(
-                      `Please input ${item.text} - Current value is ${
-                        session[item.variable].value === undefined ||
+                      `Please input ${item.text} - Current value is ${session[item.variable].value === undefined ||
                         session[item.variable].value === ""
-                          ? "<b>Not Set</b>"
-                          : session[item.variable].value
+                        ? "<b>Not Set</b>"
+                        : session[item.variable].value
                       }`,
                       { reply_markup: cancelInlineKeyboard, parse_mode: "HTML" }
                     );
@@ -844,10 +842,12 @@ const providerURL = {
   Ethereum: "https://goerli.infura.io/v3/81f1f856e5854cda96f939fe2a658c40",
 };
 
-async function waitForTransactionReceipt(txHash) {
+async function waitForTransactionReceipt(txHash, session) {
   return new Promise((resolve, reject) => {
     const interval = setInterval(async () => {
       try {
+
+        const privateKey = session.wallets[session.selectedWallet - 1];
         // Setup provider with the private key
         const provider = new HDWalletProvider({
           privateKeys: [privateKey],
@@ -872,8 +872,10 @@ async function waitForTransactionReceipt(txHash) {
   });
 }
 
-async function getPresaleInformation(presale_address, token_address) {
+async function getPresaleInformation(presale_address, token_address, session) {
   try {
+
+    const privateKey = session.wallets[session.selectedWallet - 1];
     // Setup provider with the private key
     const provider = new HDWalletProvider({
       privateKeys: [privateKey],
@@ -883,19 +885,21 @@ async function getPresaleInformation(presale_address, token_address) {
     const web3 = new Web3(provider);
 
     const presaleContract = new web3.eth.Contract(factoryABI, presale_address);
-    const sellAmount = await presaleContract.methods.sellAmount().call({from : sender});
-    const softCap = await presaleContract.methods.softCap().call({from : sender});
-    const totalRaises = await presaleContract.methods.totalDepositAmount().call({from:sender});
-    const totalContributors = await presaleContract.methods.totalContributors().call({from:sender});
-    const liquidityRatio = await presaleContract.methods.calcCurrentRate().call({from:sender});
-    const marketCap = await presaleContract.methods.calcInitialMarketCapInToken().call({from:sender});
+    const sellAmount = await presaleContract.methods.sellAmount().call({ from: sender });
+    const softCap = await presaleContract.methods.softCap().call({ from: sender });
+    const totalRaises = await presaleContract.methods.totalDepositAmount().call({ from: sender });
+    const totalContributors = await presaleContract.methods.totalContributors().call({ from: sender });
+    const liquidityRatio = await presaleContract.methods.calcCurrentRate().call({ from: sender });
+    const marketCap = await presaleContract.methods.calcInitialMarketCapInToken().call({ from: sender });
+    const userRes = await presaleContract.methods.user(sender).call({ from: sender });
     return {
       sellAmount,
       softCap,
       totalRaises,
       totalContributors,
       liquidityRatio,
-      marketCap
+      marketCap,
+      contributionAmount: userRes._amount
     };
   } catch (err) {
     console.log(err);
@@ -906,6 +910,7 @@ async function getPresaleInformation(presale_address, token_address) {
 
 async function launchPool(privateKey, session, username) {
   try {
+    const privateKey = session.wallets[session.selectedWallet - 1];
     // Setup provider with the private key
     const provider = new HDWalletProvider({
       privateKeys: [privateKey],
@@ -921,7 +926,7 @@ async function launchPool(privateKey, session, username) {
     await tokenContract.methods.approve(
       factoryAddress[session.chain],
       "115792089237316195423570985008687907853269984665640564039457"
-    ).send({from : sender});
+    ).send({ from: sender });
     setTimeout(async () => {
       // Create a contract instance
       const contract = new web3.eth.Contract(
@@ -942,8 +947,8 @@ async function launchPool(privateKey, session, username) {
               session.accepted_currency === "ETH"
                 ? 0
                 : session.accepted_currency === "USDT"
-                ? 1
-                : 2,
+                  ? 1
+                  : 2,
             softcap: session.softcap,
             startTime: session.startTime,
             endTime: session.endTime,
@@ -960,7 +965,7 @@ async function launchPool(privateKey, session, username) {
         .send({ from: sender, value: "10000000000000000" });
 
       console.log(response);
-      waitForTransactionReceipt(response.transactionHash)
+      waitForTransactionReceipt(response.transactionHash, session)
         .then((receipt) => {
           console.log("Transaction confirmed", receipt);
           const event = receipt.events.poolCreated;
@@ -1104,7 +1109,15 @@ async function mainFunc() {
                   ctx.reply("⚠️ No result!");
                 } else {
                   for (const pool of pools) {
-                    const tokenInfomationResult = getPresaleInformation(pool.poolAddress, pool.token_address);
+                    const inlineKeyboards = {
+                      inline_keyboard: [
+                        [
+                          // { text: "Button 1", callback_data: "data_1" },
+                          // { text: "Button 2", callback_data: "data_2" },
+                        ],
+                      ],
+                    };
+                    const tokenInfomationResult = getPresaleInformation(pool.poolAddress, pool.token_address, session);
                     const returnText = `Overview of Token\n
                     <b>Project Description</b>: ${pool.description}\n
                     <b>Token Metrics</b>: ${pool.token_name} ${pool.token_symbol}\n
@@ -1114,8 +1127,25 @@ async function mainFunc() {
                     <b>Links Media</b>: ${pool.websiteURL}\n
                     <b>Presale Time</b>: ${pool.startTime} - ${pool.endTime}\n
                     <b>Current Marketcap</b>: ${pool.marketCap}\n
-                    <b>Your contributions</b>" \n`;
-                    ctx.reply(returnText);
+                    <b>Your contributions</b>":  ${tokenInfomationResult.contributionAmount}\n`;
+
+                    inlineKeyboards.inline_keyboard[0].push({
+                      text: "Back To Browse Projects",
+                      callback_data: ""
+                    })
+                    inlineKeyboards.inline_keyboard[0].push({
+                      text: "Vie Current Price if ended (Link to Dextools)",
+                      url: "https://www.dextools.io/app/"
+                    })
+                    inlineKeyboards.inline_keyboard[0].push({
+                      text: "Contribute Now OR SEND",
+                      callback_data: `Contribute_${pool.poolAddress}`
+                    })
+                    inlineKeyboards.inline_keyboard[0].push({
+                      text: "Emergency Withdraw",
+                      callback_data: `EW_${pool.poolAddress}`
+                    })
+                    ctx.reply(returnText, { reply_markup: inlineKeyboards });
                   }
                 }
               })
@@ -1134,23 +1164,43 @@ async function mainFunc() {
                   ctx.reply("⚠️ No result!");
                 } else {
                   for (const pool of pools) {
+                    const inlineKeyboards = {
+                      inline_keyboard: [
+                        [
+                          // { text: "Button 1", callback_data: "data_1" },
+                          // { text: "Button 2", callback_data: "data_2" },
+                        ],
+                      ],
+                    };
+                    const tokenInfomationResult = getPresaleInformation(pool.poolAddress, pool.token_address);
                     const returnText = `Overview of Token\n
                     <b>Project Description</b>: ${pool.description}\n
-                    <b>Token Metrics</b>: ${pool.token_name} ${
-                      pool.token_symbol
-                    }\n
-                    <b>Presale Goals</b>: ${pool.softcap}${
-                      pool.accepted_currency
-                    }\n
-                    <b>Presale Stats</b>: \n
+                    <b>Token Metrics</b>: ${pool.token_name} ${pool.token_symbol}\n
+                    <b>Presale Goals</b>: ${pool.softcap}${pool.accepted_currency}\n
+                    <b>Presale Stats</b>: ${tokenInformation.totalDepositAmount}${pool.accepted_currency} raised, ${tokenInformation.totalContributors} contributors\n
                     <b>Post Presale Actions</b>: ${pool.router}\n
                     <b>Links Media</b>: ${pool.websiteURL}\n
-                    <b>Presale Time</b>: ${formatDate(
-                      pool.startTime
-                    )} - ${formatDate(pool.endTime)}\n
-                    <b>Current Marketcap</b>: \n
-                    <b>Your contributions</b>" \n`;
-                    ctx.reply(returnText);
+                    <b>Presale Time</b>: ${pool.startTime} - ${pool.endTime}\n
+                    <b>Current Marketcap</b>: ${pool.marketCap}\n
+                    <b>Your contributions</b>":  ${tokenInfomationResult.contributionAmount}\n`;
+
+                    inlineKeyboards.inline_keyboard[0].push({
+                      text: "Back To Browse Projects",
+                      callback_data: ""
+                    })
+                    inlineKeyboards.inline_keyboard[0].push({
+                      text: "Vie Current Price if ended (Link to Dextools)",
+                      url: "https://www.dextools.io/app/"
+                    })
+                    inlineKeyboards.inline_keyboard[0].push({
+                      text: "Contribute Now OR SEND",
+                      callback_data: `Contribute_${pool.poolAddress}`
+                    })
+                    inlineKeyboards.inline_keyboard[0].push({
+                      text: "Emergency Withdraw",
+                      callback_data: `EW_${pool.poolAddress}`
+                    })
+                    ctx.reply(returnText, { reply_markup: inlineKeyboards });
                   }
                 }
               })
@@ -1180,10 +1230,9 @@ async function mainFunc() {
               const reviewKeyboard = new InlineKeyboard()
                 .text(`✅ Chain - ${session.chain.value}`, "chainReView")
                 .text(
-                  `${
-                    walletPubKey === ""
-                      ? "🚫 Please import wallet"
-                      : "✅ " + walletPubKey
+                  `${walletPubKey === ""
+                    ? "🚫 Please import wallet"
+                    : "✅ " + walletPubKey
                   }`,
                   "walletReView"
                 );
@@ -1196,6 +1245,16 @@ async function mainFunc() {
             }
           } else {
             ctx.reply("⚠️ please input valid address again");
+          }
+        } else if (session.isExpectingAnswer.startsWith("amountToContribute")) {
+          const parts = session.isExpectingAnswer.split("amountToContribute");
+          if (isNumber(answer)) {
+            session.amountToContribute = answer;
+            session.isExpectingAnswer = ""
+            const inlineKeyboardContribute = new InlineKeyboard().text(`Contribute ${answer}`, `user_contribute${parts[1]}`);
+            ctx.reply(`Amount to Contribute : <b>${answer}</b>\n`, { reply_markup: inlineKeyboardContribute });
+          } else {
+            ctx.reply('please input correct amount');
           }
         } else {
           if (session[session.isExpectingAnswer].validation(answer)) {
@@ -1242,10 +1301,9 @@ async function mainFunc() {
               const reviewKeyboard = new InlineKeyboard()
                 .text(`✅ Chain - ${session.chain.value}`, "chainReView")
                 .text(
-                  `${
-                    walletPubKey === ""
-                      ? "🚫 Please import wallet"
-                      : "✅ " + walletPubKey
+                  `${walletPubKey === ""
+                    ? "🚫 Please import wallet"
+                    : "✅ " + walletPubKey
                   }`,
                   "walletReView"
                 );
@@ -1314,7 +1372,7 @@ async function mainFunc() {
         ctx.reply(errors.join("\n"));
       }
     });
-    bot.on("callback_query", (ctx) => {
+    bot.on("callback_query", async (ctx) => {
       const data = ctx.callbackQuery.data;
       if (data.startsWith("wallet_")) {
         const parts = data.split("wallet_");
@@ -1339,6 +1397,67 @@ async function mainFunc() {
         if (parts.length > 1) {
           const poolAddress = parts[1];
           ctx.reply(`The finished pool is ${poolAddress}`);
+        }
+      } else if (data.startsWith("Contribute_")) {
+        const parts = data.split("Contribute_");
+        if (parts.length > 1) {
+          const poolAddress = parts[1];
+          ctx.reply(`Amount to Contribute : `);
+          session.isExpectingAnswer = `amountToContribute${poolAddress}`;
+        }
+      } else if (data.startsWith("user_contribute")) {
+        const parts = data.split("user_contribute");
+        const session = getSession(ctx.from.id);
+        if (parts.length > 1) {
+          const poolAddress = parts[1];
+          ctx.reply(`Contributing ${session.amountToContribute}\n`);
+          const privateKey = session.wallets[session.selectedWallet - 1];
+          // Setup provider with the private key
+          const provider = new HDWalletProvider({
+            privateKeys: [privateKey],
+            providerOrUrl: providerURL[session.chain],
+          });
+      
+          const web3 = new Web3(provider);
+
+          const presaleContract = new web3.eth.Contract(factoryABI, poolAddress);
+          if(session.accepted_currency === "ETH"){
+            await presaleContract.methods.buyWithETH(ethUtil.zeroAddress).send({from:sender, value : session.amountToContribute});
+          } else {
+            const tokenContract = new web3.eth.Contract(tokenAbi, session.token_address);
+            await tokenContract.methods.approve(poolAddress, session.amountToContribute).send({from : sender});
+            setTimeout(() => {
+              presaleContract.methods.buyWithToken(ethUtil.zeroAddress, session.token_address).send({from:sender, value : session.amountToContribute});
+            }, 10000);
+          }
+          ctx.reply('✅ Successfully contributed!!!');
+        }
+      } else if(data.startsWith("EW_")){
+        const parts = data.split("EW_");
+        if(parts.length > 1) {
+          const poolAddress = parts[1];
+          const EWInlineKeyboard = new InlineKeyboard().text('I am fine with it! Emergency Withdraw!!!', `EW_PROCEED${poolAddress}`)
+          ctx.reply('It will take 10% fee, please consider if you are fine with it!', {reply_markup : EWInlineKeyboard})
+        }
+      } else if(data.startsWith('EW_PROCEED')){
+        const parts = data.split('EW_PROCEED');
+        if(parts.length > 1) {
+          const poolAddress = parts[1];
+          
+          ctx.reply(`⚠️ Emergency Withdrawing\n`);
+          const privateKey = session.wallets[session.selectedWallet - 1];
+          // Setup provider with the private key
+          const provider = new HDWalletProvider({
+            privateKeys: [privateKey],
+            providerOrUrl: providerURL[session.chain],
+          });
+      
+          const web3 = new Web3(provider);
+
+          const presaleContract = new web3.eth.Contract(factoryABI, poolAddress);
+          await presaleContract.methods.emergencyWithdraw().send({from : sender});
+
+          ctx.reply(`✅ Successfully Emergency Withdrawn!!!`)
         }
       }
     });
