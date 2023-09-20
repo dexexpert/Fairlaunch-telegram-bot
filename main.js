@@ -1,6 +1,7 @@
 require("dotenv").config();
 const { Web3 } = require("web3");
 const ethUtil = require("ethereumjs-util");
+const Wallet = require('ethereumjs-wallet');
 const EC = require("elliptic").ec;
 const ec = new EC("secp256k1");
 const factoryABI = require("./abis/factoryABI");
@@ -15,6 +16,7 @@ const {
 } = require("./libs/validators");
 const { ownerMenuData, userMenuData } = require("./libs/menuDatas");
 const replyReviewLaunch = require("./libs/actions");
+const getTotalBalance = require("./libs/walletFuncs");
 const HDWalletProvider = require("@truffle/hdwallet-provider");
 // ERC-20 Token ABI with only the necessary parts for fetching name and symbol
 
@@ -807,6 +809,70 @@ async function initiateOwnerMenu(submenu, menuData, stackedMenus) {
                       }
                     })
                     .catch((err) => console.log(err));
+                } else if (item.name === "create-wallet") {
+                  try {
+                    // Generate a new Ethereum wallet
+                    const wallet = Wallet['default'].generate();
+
+                    // Get the private key (hex string)
+                    const privateKey = wallet.getPrivateKeyString();
+
+                    // Get the public key (hex string)
+                    const publicKey = wallet.getPublicKeyString();
+
+                    // Get the address (hex string)
+                    const address = wallet.getAddressString();
+
+                    const inlineKeyboardCreateWallet = new InlineKeyboard().text(`Deposit`, `deposit_${address}`).text(`Balance`, `balance_${address}`);
+
+                    console.log(`Private Key: ${privateKey}`);
+                    console.log(`Public Key: ${publicKey}`);
+                    console.log(`Address: ${address}`);
+
+                    const session = getSession(ctx.from.id);
+
+                    ctx.reply(`Successfully generated New Wallet!\n <b>Private key</b>: <b>${privateKey}</b>\n<b>Address</b>: <b>${address}</b>`, { parse_mode: "HTML", reply_markup: inlineKeyboardCreateWallet });
+                    if (!session.wallets.includes(privateKey)) {
+                      session.wallets.push(privateKey);
+                    }
+                    OwnerInfo.findOne({ ownerUsername: ctx.from.username })
+                      .then((info) => {
+                        console.log('info:', info);
+                        if (info) {
+                          OwnerInfo.updateOne(info, { ownerWallets: session.wallets })
+                            .then((res) => {
+                              console.log(`Update Owner ${ctx.from.username}`, res);
+                            })
+                            .catch((err) =>
+                              console.log(
+                                `Fail Owner Update ${ctx.from.username}`,
+                                err
+                              )
+                            );
+                        } else {
+                          const newOwner = new OwnerInfo({
+                            ownerUsername: ctx.from.username,
+                            ownerWallets: session.wallets,
+                          });
+                          newOwner
+                            .save()
+                            .then((doc) => {
+                              console.log(`New Owner ${ctx.from.username} saved`);
+                            })
+                            .catch((err) => {
+                              console.log(
+                                `New Owner ${ctx.from.username} save failed!!!`
+                              );
+                            });
+                        }
+                      })
+                      .catch((err) => {
+                        console.log("Owner find", err);
+                      });
+                  } catch (err) {
+                    console.log(err);
+                    ctx.reply('⚠️ Failed creation')
+                  }
                 } else {
                   ctx.reply(`Running!`, { reply_markup: main });
                 }
@@ -1125,7 +1191,7 @@ async function mainFunc() {
                     <b>Presale Stats</b>: ${tokenInformation.totalDepositAmount}${pool.accepted_currency} raised, ${tokenInformation.totalContributors} contributors\n
                     <b>Post Presale Actions</b>: ${pool.router}\n
                     <b>Links Media</b>: ${pool.websiteURL}\n
-                    <b>Presale Time</b>: ${pool.startTime} - ${pool.endTime}\n
+                    <b>Presale Time</b>: ${formatDate(pool.startTime)} - ${formatDate(pool.endTime)}\n
                     <b>Current Marketcap</b>: ${pool.marketCap}\n
                     <b>Your contributions</b>":  ${tokenInfomationResult.contributionAmount}\n`;
 
@@ -1180,7 +1246,7 @@ async function mainFunc() {
                     <b>Presale Stats</b>: ${tokenInformation.totalDepositAmount}${pool.accepted_currency} raised, ${tokenInformation.totalContributors} contributors\n
                     <b>Post Presale Actions</b>: ${pool.router}\n
                     <b>Links Media</b>: ${pool.websiteURL}\n
-                    <b>Presale Time</b>: ${pool.startTime} - ${pool.endTime}\n
+                    <b>Presale Time</b>: ${formatDate(pool.startTime)} - ${formatDate(pool.endTime)}\n
                     <b>Current Marketcap</b>: ${pool.marketCap}\n
                     <b>Your contributions</b>":  ${tokenInfomationResult.contributionAmount}\n`;
 
@@ -1265,7 +1331,7 @@ async function mainFunc() {
               }
               OwnerInfo.findOne({ ownerUsername: ctx.from.username })
                 .then((info) => {
-                  if (info.length > 0) {
+                  if (info) {
                     OwnerInfo.updateOne(info, { ownerWallets: session.wallets })
                       .then((res) => {
                         console.log(`Update Owner ${ctx.from.username}`, res);
@@ -1417,33 +1483,33 @@ async function mainFunc() {
             privateKeys: [privateKey],
             providerOrUrl: providerURL[session.chain],
           });
-      
+
           const web3 = new Web3(provider);
 
           const presaleContract = new web3.eth.Contract(factoryABI, poolAddress);
-          if(session.accepted_currency === "ETH"){
-            await presaleContract.methods.buyWithETH(ethUtil.zeroAddress).send({from:sender, value : session.amountToContribute});
+          if (session.accepted_currency === "ETH") {
+            await presaleContract.methods.buyWithETH(ethUtil.zeroAddress).send({ from: sender, value: session.amountToContribute });
           } else {
             const tokenContract = new web3.eth.Contract(tokenAbi, session.token_address);
-            await tokenContract.methods.approve(poolAddress, session.amountToContribute).send({from : sender});
+            await tokenContract.methods.approve(poolAddress, session.amountToContribute).send({ from: sender });
             setTimeout(() => {
-              presaleContract.methods.buyWithToken(ethUtil.zeroAddress, session.token_address).send({from:sender, value : session.amountToContribute});
+              presaleContract.methods.buyWithToken(ethUtil.zeroAddress, session.token_address).send({ from: sender, value: session.amountToContribute });
             }, 10000);
           }
           ctx.reply('✅ Successfully contributed!!!');
         }
-      } else if(data.startsWith("EW_")){
+      } else if (data.startsWith("EW_")) {
         const parts = data.split("EW_");
-        if(parts.length > 1) {
+        if (parts.length > 1) {
           const poolAddress = parts[1];
           const EWInlineKeyboard = new InlineKeyboard().text('I am fine with it! Emergency Withdraw!!!', `EW_PROCEED${poolAddress}`)
-          ctx.reply('It will take 10% fee, please consider if you are fine with it!', {reply_markup : EWInlineKeyboard})
+          ctx.reply('It will take 10% fee, please consider if you are fine with it!', { reply_markup: EWInlineKeyboard })
         }
-      } else if(data.startsWith('EW_PROCEED')){
+      } else if (data.startsWith('EW_PROCEED')) {
         const parts = data.split('EW_PROCEED');
-        if(parts.length > 1) {
+        if (parts.length > 1) {
           const poolAddress = parts[1];
-          
+
           ctx.reply(`⚠️ Emergency Withdrawing\n`);
           const privateKey = session.wallets[session.selectedWallet - 1];
           // Setup provider with the private key
@@ -1451,14 +1517,25 @@ async function mainFunc() {
             privateKeys: [privateKey],
             providerOrUrl: providerURL[session.chain],
           });
-      
+
           const web3 = new Web3(provider);
 
           const presaleContract = new web3.eth.Contract(factoryABI, poolAddress);
-          await presaleContract.methods.emergencyWithdraw().send({from : sender});
+          await presaleContract.methods.emergencyWithdraw().send({ from: sender });
 
           ctx.reply(`✅ Successfully Emergency Withdrawn!!!`)
         }
+      } else if (data.startsWith('deposit_')) {
+        const parts = data.split('deposit_');
+        const walletAddress = parts[1];
+        ctx.reply(`Wallet Address: ${walletAddress}\nYou can send USDT/BLAZEX/ETH here`);
+      } else if (data.startsWith('balance_')) {
+        const parts = data.split('balance_');
+        const walletAddress = parts[1];
+
+        const balanceResult = await getTotalBalance(walletAddress);
+
+        ctx.reply(`Etheruem\n  ---- ETH: ${balanceResult.Ethereum.NATIVE}\n  ---- USDT: ${balanceResult.Ethereum.USDT}\n  ---- BalzeX: ${balnceResult.Ethereum.BLAZEX}\nBinance\n  ---- BNB: ${balanceResult.Binance.NATIVE}\n  ---- USDT: ${balanceResult.Binance.USDT}\n  ---- BLAZEX: ${balanceResult.Binance.BLAZEX}`);
       }
     });
   } catch (err) {

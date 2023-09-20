@@ -113,11 +113,6 @@ const ownerMenuData = [
       {
         text: "Create a Wallet",
         name: "create-wallet",
-        submenu: [
-          { text: "Deposit", name: "deposit" },
-          { text: "Balance", name: "balance", isRow: true },
-          { text: "Return", name: "return", isLast: true },
-        ],
       },
       {
         text: "Import Wallet",
@@ -192,11 +187,7 @@ const userMenuData = [
     submenu: [
       {
         text: "Create a Wallet",
-        name: "user-create-wallet",
-        submenu: [
-          { text: "Deposit", name: "user-deposit" },
-          { text: "Balance", name: "user-balance", isRow: true, isLast: true },
-        ],
+        name: "create-wallet",
       },
       {
         text: "Import Wallet",
