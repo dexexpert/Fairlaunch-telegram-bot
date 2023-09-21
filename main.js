@@ -512,7 +512,7 @@ async function initiateOwnerMenu(submenu, menuData, stackedMenus) {
                           "Wallet " +
                           cnt +
                           ` (${getWalletPublicKeyFromindex(session, cnt)})`,
-                        callback_data: "wallet_" + cnt,
+                        callback_data: (item.isUserPart ? "user" : "owner") + "wallet_" + cnt,
                       });
                       cnt++;
                     }
@@ -1440,8 +1440,36 @@ async function mainFunc() {
     });
     bot.on("callback_query", async (ctx) => {
       const data = ctx.callbackQuery.data;
-      if (data.startsWith("wallet_")) {
-        const parts = data.split("wallet_");
+      if (data.startsWith("ownerwallet_")) {
+        const parts = data.split("ownerwallet_");
+        if (parts.length > 1) {
+          const inlineKeyboardOwnerWallet = new InlineKeyboard()
+          // TODO : should indicate same callback data as my presale menu
+          .text('My presales', ``)
+          // TODO : should indiciate same callback data as fair launch menu
+          .text('Start a Fair Launch', ``)
+          .row()
+          .text('Remove Wallet', `removeWallet_${session.wallets[session.selectedWallet - 1]}`)
+          // TODO : should indicate same callback data as deposit menu
+          .text('Deposit', ``)
+          .row()
+          // TODO : should indicate same callback data as send menu
+          .text('Send Menu', ``)
+          .text('Show Private Key', `showPrivateKey_${session.wallets[session.selectedWallet - 1]}`)
+          .row()
+
+          ctx.answerCallbackQuery({ text: "Pressed Wallet " + parts[1] + "!" });
+          const session = getSession(ctx.from.id);
+          session.selectedWallet = parseInt(parts[1]);
+          // Replace 'yourPrivateKeyHex' with your actual private key in hexadecimal format.
+
+          const addressHex = getCurrentWalletPublicKey(session);
+
+          ctx.reply("Current User Wallet's Information : " + addressHex, {reply_markup : inlineKeyboardOwnerWallet});
+        }
+      }
+      else if (data.startsWith("userwallet_")) {
+        const parts = data.split("userwallet_");
         if (parts.length > 1) {
           ctx.answerCallbackQuery({ text: "Pressed Wallet " + parts[1] + "!" });
           const session = getSession(ctx.from.id);
@@ -1450,7 +1478,17 @@ async function mainFunc() {
 
           const addressHex = getCurrentWalletPublicKey(session);
 
-          ctx.reply("Current Wallet's Information : " + addressHex);
+          const inlineKeybardUserWallet = new InlineKeyboard()
+          .text('Contributions & Claim', `userContributionAndClaim_${session.wallets[session.selectedWallet - 1]}`)
+          .text('Show Private Key', `showPrivateKey_${session.wallets[session.selectedWallet - 1]}`)
+          .row()
+          .text('Remove Wallet', `removeWallet_${session.wallets[session.selectedWallet - 1]}`)
+          .text('Deposit', `deposit_${session.wallets[session.selectedWallet - 1]}`)
+          .row()
+          // TODO : Send should be similar to Deployer Bot
+          .text('Send', ``)
+
+          ctx.reply("Current Owner Wallet's Information : " + addressHex, {reply_markup : inlineKeybardUserWallet});
         }
       } else if (data.startsWith("ongoing")) {
         const parts = data.split("ongoing");

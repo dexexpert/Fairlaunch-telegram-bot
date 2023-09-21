@@ -123,6 +123,7 @@ const ownerMenuData = [
       {
         text: "Manage Wallets",
         name: "manage-wallet",
+        isUserPart : false,
         isLast: true,
       },
     ],
@@ -197,6 +198,7 @@ const userMenuData = [
       {
         text: "Manage Wallets",
         name: "manage-wallet",
+        isUserPart : true,
         isRow: true,
         isLast: true,
       },

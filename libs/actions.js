@@ -61,4 +61,8 @@ async function replyReviewLaunch(ctx, session, launchInlineKeyboard) {
   }
 }
 
+async function getPresaleInformation(poolAddress, session) {
+  
+}
+
 module.exports = replyReviewLaunch;
