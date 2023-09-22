@@ -212,21 +212,6 @@ const userMenuData = [
       {
         text: "Contributions",
         name: "contributions",
-        submenu: [
-          {
-            text: "1. Project 1",
-            name: "contribution-project1",
-          },
-          {
-            text: "2. Project 2",
-            name: "contribution-project2",
-          },
-          {
-            text: "3. Project 3",
-            name: "contribution-project3",
-            isLast: true,
-          },
-        ],
       },
       { text: "Claim", name: "claim", isLast: true },
     ],

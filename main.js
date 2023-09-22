@@ -75,6 +75,14 @@ const poolInfoSchema = new Schema({
   description: String,
 });
 
+const contributionDataSchema = new Schema({
+  userWallet: String,
+  poolAddress: String,
+  contributionAmount: Number,
+  contributionTime: Number,
+  claimed: Boolean,
+});
+
 const ownerInfoSchema = new Schema({
   ownerUsername: String,
   ownerWallets: [String],
@@ -82,12 +90,13 @@ const ownerInfoSchema = new Schema({
 
 const PoolInfo = mongoose.model("PoolInfo", poolInfoSchema);
 const OwnerInfo = mongoose.model("OwnerInfo", ownerInfoSchema);
+const ContributionInfo = mongoose.model("ContributionInfo", contributionDataSchema);
 
 const bot = new Bot(process.env.BOT_TOKEN);
 
 const sessions = {};
 function formatDate(date1) {
-  const date = new Date(date1*1000);
+  const date = new Date(date1 * 1000);
   const year = date.getFullYear();
 
   // JavaScript's getMonth() function returns month index starting from 0 (0 = January, 1 = February, ...)
@@ -363,7 +372,7 @@ function getCurrentWalletPublicKey(session) {
 
 function getWalletPublicKeyFromindex(session, index) {
   if (session.wallets.length === 0) return "";
-  const privateKeyHex = session.wallets[index - 1].slice(2);
+  const privateKeyHex = session.wallets[Number(index) - 1].slice(2);
 
   // Convert the private key string to a Buffer
   const privateKey = Buffer.from(privateKeyHex, "hex");
@@ -379,9 +388,57 @@ function getWalletPublicKeyFromindex(session, index) {
   return addressHex;
 }
 
+function contributionAction(ctx, session) {
+  if (session.wallets.length === 0) {
+    ctx.reply(
+      "⛔️ No wallets selected and can't load your presale info"
+    );
+  } else {
+    ContributionInfo.find({ userWallet: getCurrentWalletPublicKey(session) })
+      .then(contributions => {
+        if (contributions.length > 0) {
+          const projectsInlineKeyboard = new InlineKeyboard();
+          for (const contributionItem of contributions) {
+            PoolInfo.findOne({ poolAddress: contributionItem.poolAddress, chain: session.chain })
+              .then(async (pools) => {
+                if (pools === null) {
+                  ctx.reply(`⚠️ No result! for ${contributionItem.poolAddress}`);
+                } else {
+                  const privateKey = session.wallets[session.selectedWallet - 1];
+                  // Setup provider with the private key
+                  const provider = new HDWalletProvider({
+                    privateKeys: [privateKey],
+                    providerOrUrl: providerURL[session.chain],
+                  });
+
+                  const web3 = new Web3(provider);
+
+                  const accounts = await web3.eth.getAccounts();
+                  const sender = accounts[0];
+                  const presaleContract = new web3.eth.Contract(factoryABI, presale_address);
+                  const isFinalized = await presaleContract.methods.isFinalized().call({ from: sender });
+                  projectsInlineKeyboard.text(`${pools.token_name} - ${pools.accepted_currency} ${isFinalized === true ? '✅ You can claim' : ''}`, `userProject_${pools.chain}_${pools.poolAddress}`);
+                }
+              })
+              .catch((err) => {
+                console.log(err);
+              });
+          }
+          ctx.reply(`Your contributed pools are her`, { reply_markup: projectsInlineKeyboard });
+        } else {
+          ctx.reply('⚠️ You have no contributed presales');
+        }
+      })
+      .catch(err => { console.log(err); ctx.reply(`⚠️ Failed fetching contributions`) })
+    const inlineKeyboardProject = new InlineKeyboard().text();
+  }
+}
+
 const main = new Menu("root-menu")
   .submenu("Owner Menu", "owner-menu")
   .submenu("User Menu", "user-menu");
+
+let ongoingPresaleMenu;
 
 const cancelInlineKeyboard = new InlineKeyboard().text(
   "cancel",
@@ -397,6 +454,9 @@ async function initiateOwnerMenu(submenu, menuData, stackedMenus) {
         stackedMenus.push(menu1);
         if ("isRow" in item) {
           submenu.row();
+        }
+        if (item.name === 'my-presales') {
+          ongoingPresaleMenu = menu1;
         }
         // main.register(menu1);
       } else {
@@ -550,7 +610,7 @@ async function initiateOwnerMenu(submenu, menuData, stackedMenus) {
                           ) {
                             inlineKeyboard.inline_keyboard[0].push({
                               text: pool.token_name,
-                              callback_data: "ongoing" + pool.poolAddress,
+                              callback_data: "ongoing" + pool.chain + pool.poolAddress,
                             });
                           }
                         }
@@ -874,6 +934,8 @@ async function initiateOwnerMenu(submenu, menuData, stackedMenus) {
                     console.log(err);
                     ctx.reply('⚠️ Failed creation')
                   }
+                } else if (item.name === "contributions") {
+                  contributionAction(ctx, session);
                 } else {
                   ctx.reply(`Running!`, { reply_markup: main });
                 }
@@ -951,6 +1013,9 @@ async function launchPool(privateKey, session, username) {
     });
 
     const web3 = new Web3(provider);
+
+    const accounts = await web3.eth.getAccounts();
+    const sender = accounts[0];
 
     const tokenContract = new web3.eth.Contract(
       tokenAbi,
@@ -1057,6 +1122,44 @@ async function launchPool(privateKey, session, username) {
       provider.engine.stop();
     }, 10000);
   } catch (err) {
+    console.log(err);
+  }
+}
+
+async function cancelAndRefundFunc(PK, poolAddress, chain) {
+  const provider = new HDWalletProvider({
+    privateKeys: [PK],
+    providerOrUrl: providerURL[chain],
+  });
+
+  const web3 = new Web3(provider);
+  const accounts = await web3.eth.getAccounts();
+  const sender = accounts[0];
+
+  const presaleContract = new web3.eth.Contract(fairlaunchAbi, poolAddress);
+  try {
+    await presaleContract.methods.cancelAndRefund().send({ from: sender });
+  }
+  catch (err) {
+    console.log(err);
+  }
+}
+
+async function finalizeAndAddLPFunc(PK, poolAddress, chain) {
+  const provider = new HDWalletProvider({
+    privateKeys: [PK],
+    providerOrUrl: providerURL[chain],
+  });
+
+  const web3 = new Web3(provider);
+  const accounts = await web3.eth.getAccounts();
+  const sender = accounts[0];
+
+  const presaleContract = new web3.eth.Contract(fairlaunchAbi, poolAddress);
+  try {
+    await presaleContract.methods.finalize().send({ from: sender });
+  }
+  catch (err) {
     console.log(err);
   }
 }
@@ -1410,23 +1513,24 @@ async function mainFunc() {
       if (data.startsWith("ownerwallet_")) {
         const parts = data.split("ownerwallet_");
         if (parts.length > 1) {
+          const session = getSession(ctx.from.id);
           const inlineKeyboardOwnerWallet = new InlineKeyboard()
             // TODO : should indicate same callback data as my presale menu
-            .text('My presales', ``)
+            .text('My presales', `my-presales`)
             // TODO : should indiciate same callback data as fair launch menu
-            .text('Start a Fair Launch', ``)
+            .text('Start a Fair Launch', `start-fairlaunch`)
             .row()
-            .text('Remove Wallet', `removeWallet_${session.wallets[session.selectedWallet - 1]}`)
+            .text('Remove Wallet', `removeWallet_`)
             // TODO : should indicate same callback data as deposit menu
-            .text('Deposit', ``)
+            .text('Deposit', `deposit_${getWalletPublicKeyFromindex(session, session.selectedWallet)}`)
             .row()
             // TODO : should indicate same callback data as send menu
-            .text('Send Menu', ``)
-            .text('Show Private Key', `showPrivateKey_${session.wallets[session.selectedWallet - 1]}`)
+            .text('Send', `send-menu_${session.selectedWallet - 1}`)
+            .text('Show Private Key', `showPrivateKey_${session.selectedWallet}`)
             .row()
 
-          ctx.answerCallbackQuery({ text: "Pressed Wallet " + parts[1] + "!" });
-          const session = getSession(ctx.from.id);
+          // ctx.answerCallbackQuery({ text: "Pressed Wallet " + parts[1] + "!" });
+
           session.selectedWallet = parseInt(parts[1]);
           // Replace 'yourPrivateKeyHex' with your actual private key in hexadecimal format.
 
@@ -1438,7 +1542,7 @@ async function mainFunc() {
       else if (data.startsWith("userwallet_")) {
         const parts = data.split("userwallet_");
         if (parts.length > 1) {
-          ctx.answerCallbackQuery({ text: "Pressed Wallet " + parts[1] + "!" });
+          // ctx.answerCallbackQuery({ text: "Pressed Wallet " + parts[1] + "!" });
           const session = getSession(ctx.from.id);
           session.selectedWallet = parseInt(parts[1]);
           // Replace 'yourPrivateKeyHex' with your actual private key in hexadecimal format.
@@ -1447,40 +1551,50 @@ async function mainFunc() {
 
           const inlineKeybardUserWallet = new InlineKeyboard()
             .text('Contributions & Claim', `userContributionAndClaim_${session.wallets[session.selectedWallet - 1]}`)
-            .text('Show Private Key', `showPrivateKey_${session.wallets[session.selectedWallet - 1]}`)
+            .text('Show Private Key', `showPrivateKey_${session.selectedWallet}`)
             .row()
-            .text('Remove Wallet', `removeWallet_${session.wallets[session.selectedWallet - 1]}`)
-            .text('Deposit', `deposit_${session.wallets[session.selectedWallet - 1]}`)
+            .text('Remove Wallet', `removeWallet_`)
+            .text('Deposit', `deposit_${getWalletPublicKeyFromindex(session, session.selectedWallet)}`)
             .row()
             // TODO : Send should be similar to Deployer Bot
-            .text('Send', ``)
+            .text('Send', `send-menu_${session.selectedWallet - 1}`)
 
           ctx.reply("Current Owner Wallet's Information : " + addressHex, { reply_markup: inlineKeybardUserWallet });
         }
       } else if (data.startsWith("ongoing")) {
-        const parts = data.split("ongoing");
+        let poolChain;
+        let startString = 'ongoingEtherum';
+        if (data.startsWith('ongoingEthereum')) {
+          poolChain = 'Ethereum';
+        } else if (data.startsWith('ongoingBinance')) {
+          poolChain = 'Binance';
+          startString = 'ongoingBinance';
+        }
+        const parts = data.split(startString);
         if (parts.length > 1) {
           const poolAddress = parts[1];
-          PoolInfo.find({ poolAddress: poolAddress })
+          PoolInfo.find({ poolAddress: poolAddress, chain: poolChain })
             .then(async (pools) => {
               if (pools.length > 0) {
                 const session = getSession(ctx.from.id);
                 const replyInlineKeyboard = new InlineKeyboard()
-                  .text('Refresh Data : ', `ongoing_${poolAddress}`)
+                  .text('Refresh Data : ', `ongoing${poolChain}${poolAddress}`)
                   // TODO : editProjectDetail_
                   .text('Edit project details', `editProjectDetail_${poolAddress}`)
                   .row()
                   //TODO : finalizeAddLP_
-                  .text('Finalize & Add LP', `finalizeAddLP_${poolAddress}`)
+                  .text('Finalize & Add LP', `finalizeAddLP_${pools[0].chain}_${poolAddress}`)
                   //TODO : cancelRefund_
-                  .text('Cancel & Refund', `cancelRefund_${poolAddress}`);
+                  .text('Cancel & Refund', `refund_${pools[0].chain}_${poolAddress}`);
 
                 const tokenInfomationResult = getPresaleInformation(poolAddress, poolAddress, session);
-                await showInformationAboutProjectOwner(pools[0], ctx, tokenInfomationResult, session, replyInlineKeyboard);
+                if (tokenInfomationResult.isFinalized === false) {
+                  await showInformationAboutProjectOwner(pools[0], ctx, tokenInfomationResult, session, replyInlineKeyboard);
+                }
                 // ctx.reply(`The ongoing pool is ${poolAddress}`);
               }
             })
-            .catch((err) => {console.log(err); ctx.reply(`Wrong address inputed`)});
+            .catch((err) => { console.log(err); ctx.reply(`Wrong address inputed`) });
         }
       } else if (data.startsWith("finished")) {
         const parts = data.split("finished");
@@ -1501,11 +1615,12 @@ async function mainFunc() {
                 // ctx.reply(`The ongoing pool is ${poolAddress}`);
               }
             })
-            .catch((err) => {console.log(err); ctx.reply(`Wrong address inputed`)});
+            .catch((err) => { console.log(err); ctx.reply(`Wrong address inputed`) });
         }
       } else if (data.startsWith("Contribute_")) {
         const parts = data.split("Contribute_");
         if (parts.length > 1) {
+          const session = getSession(ctx.from.id);
           const poolAddress = parts[1];
           ctx.reply(`Amount to Contribute : `);
           session.isExpectingAnswer = `amountToContribute${poolAddress}`;
@@ -1524,18 +1639,48 @@ async function mainFunc() {
           });
 
           const web3 = new Web3(provider);
+          const accounts = await web3.eth.getAccounts();
+          const sender = accounts[0];
 
-          const presaleContract = new web3.eth.Contract(factoryABI, poolAddress);
-          if (session.accepted_currency === "ETH") {
-            await presaleContract.methods.buyWithETH(ethUtil.zeroAddress).send({ from: sender, value: session.amountToContribute });
-          } else {
-            const tokenContract = new web3.eth.Contract(tokenAbi, session.token_address);
-            await tokenContract.methods.approve(poolAddress, session.amountToContribute).send({ from: sender });
-            setTimeout(() => {
-              presaleContract.methods.buyWithToken(ethUtil.zeroAddress, session.token_address).send({ from: sender, value: session.amountToContribute });
-            }, 10000);
+          const presaleContract = new web3.eth.Contract(fairlaunchAbi, poolAddress);
+          try {
+            if (session.accepted_currency === "ETH") {
+              await presaleContract.methods.buyWithETH(ethUtil.zeroAddress).send({ from: sender, value: session.amountToContribute });
+            } else {
+              const tokenContract = new web3.eth.Contract(tokenAbi, session.token_address);
+              await tokenContract.methods.approve(poolAddress, session.amountToContribute).send({ from: sender });
+              setTimeout(async () => {
+                await presaleContract.methods.buyWithToken(ethUtil.zeroAddress, session.token_address).send({ from: sender, value: session.amountToContribute });
+              }, 10000);
+            }
+            ctx.reply('✅ Successfully contributed!!!');
+            ContributionInfo.findOne({ userWallet: sender, poolAddress: poolAddress })
+              .then(contribution => {
+                const currentTime = new Date();
+                const timestamp = Number(currentTime * 1000).toFixed(0);
+
+                if (contribution) {
+                  ContributionInfo.updateOne(contribution, { contributionAmount: contribution.contributionAmount + session.amountToContribute, contributionTime: timestamp })
+                    .then(res => {
+                      console.log(`Update contribution ${res}`);
+                    })
+                    .catch(err => {
+                      console.log(`Failed update contribution`);
+                    })
+                } else {
+                  const newContribution = new ContributionInfo({ userWallet: sender, poolAddress: poolAddress, contributionAmount: amountToContribute, contributionTime: timestamp })
+                  newContribution
+                    .save()
+                    .then((doc) => {
+                      console.log(`New contribution ${doc}`);
+                    })
+                    .catch(err => {
+                      console.log(`⚠️ New Contribution failed!!!`)
+                    })
+                }
+              }).catch(err => { console.log(err); })
           }
-          ctx.reply('✅ Successfully contributed!!!');
+          catch (err) { }
         }
       } else if (data.startsWith("EW_")) {
         const parts = data.split("EW_");
@@ -1558,8 +1703,10 @@ async function mainFunc() {
           });
 
           const web3 = new Web3(provider);
+          const accounts = await web3.eth.getAccounts();
+          const sender = accounts[0];
 
-          const presaleContract = new web3.eth.Contract(factoryABI, poolAddress);
+          const presaleContract = new web3.eth.Contract(fairlaunchAbi, poolAddress);
           await presaleContract.methods.emergencyWithdraw().send({ from: sender });
 
           ctx.reply(`✅ Successfully Emergency Withdrawn!!!`)
@@ -1575,8 +1722,236 @@ async function mainFunc() {
         const balanceResult = await getTotalBalance(walletAddress);
 
         ctx.reply(`Etheruem\n  ---- ETH: ${balanceResult.Ethereum.NATIVE}\n  ---- USDT: ${balanceResult.Ethereum.USDT}\n  ---- BalzeX: ${balnceResult.Ethereum.BLAZEX}\nBinance\n  ---- BNB: ${balanceResult.Binance.NATIVE}\n  ---- USDT: ${balanceResult.Binance.USDT}\n  ---- BLAZEX: ${balanceResult.Binance.BLAZEX}`);
+      } else if (data === 'my-presales') {
+        ctx.reply('My-Presales', { reply_markup: ongoingPresaleMenu });
+      } else if (data === 'start-fairlaunch') {
+        ctx.reply('Start Fairlaunch', { reply_markup: ownerMenu });
+      } else if (data.startsWith('removeWallet_')) {
+        const session = getSession(ctx.from.id);
+        const index = session.selectedWallet - 1;
+        if (index > -1) {
+          session.wallets.splice(index, 1);
+          OwnerInfo.findOne({ ownerUsername: ctx.from.username })
+            .then((info) => {
+              console.log('info:', info);
+              if (info) {
+                OwnerInfo.updateOne(info, { ownerWallets: session.wallets })
+                  .then((res) => {
+                    console.log(`Update Owner ${ctx.from.username}`, res);
+                  })
+                  .catch((err) =>
+                    console.log(
+                      `Fail Owner Update ${ctx.from.username}`,
+                      err
+                    )
+                  );
+              } else {
+                const newOwner = new OwnerInfo({
+                  ownerUsername: ctx.from.username,
+                  ownerWallets: session.wallets,
+                });
+                newOwner
+                  .save()
+                  .then((doc) => {
+                    console.log(`New Owner ${ctx.from.username} saved`);
+                  })
+                  .catch((err) => {
+                    console.log(
+                      `New Owner ${ctx.from.username} save failed!!!`
+                    );
+                  });
+              }
+            })
+            .catch((err) => {
+              console.log("Owner find", err);
+            });
+        }
+      } else if (data === 'send-menu_') {
+
+      } else if (data.startsWith('showPrivateKey_')) {
+        const parts = data.split('showPrivateKey_');
+        if (parts.length > 1) {
+          const session = getSession(ctx.from.id);
+          ctx.reply(`Private key: <b>${session.wallets[parts[1] - 1]}</b>`, { parse_mode: 'HTML' });
+        } else {
+          ctx.reply(`⚠️ Unable to show you private key.`);
+        }
+      } else if (data.startsWith('userContributionAndClaim_')) {
+        const session = getSession(ctx.from.id);
+        contributionAction(ctx, session);
+      } else if (data.startsWith('userProject_')) {
+        let poolChain = 'Ethereum';
+        const session = getSession(ctx.from.id);
+        let startString = 'userProject_Etherum_';
+        if (data.startsWith('userProject_Binance_')) {
+          poolChain = 'Binance';
+          startString = 'userProject_Binance_';
+        }
+        const parts = data.split(startString);
+        if (parts.length > 1) {
+          const poolAddress = parts[1];
+          const privateKey = session.wallets[session.selectedWallet - 1];
+          // Setup provider with the private key
+          const provider = new HDWalletProvider({
+            privateKeys: [privateKey],
+            providerOrUrl: providerURL[poolChain],
+          });
+
+          const web3 = new Web3(provider);
+
+          const accounts = await web3.eth.getAccounts();
+          const sender = accounts[0];
+          const presaleContract = new web3.eth.Contract(factoryABI, presale_address);
+          const isFinalized = await presaleContract.methods.isFinalized().call({ from: sender });
+          PoolInfo.find({ poolAddress: poolAddress, chain: poolChain })
+            .then((pools) => {
+              if (pools === null || pools.length === 0) {
+                ctx.reply("⚠️ No result!");
+              } else {
+                for (const pool of pools) {
+                  const inlineKeyboardUserProject = new InlineKeyboard();
+                  const tokenInfomationResult = getPresaleInformation(pool.poolAddress, pool.token_address, session);
+                  let returnText = '';
+                  if (isFinalized === false) {
+                    `Overview of Token\n
+                    <b>Project Description</b>: ${pool.description}\n
+                    <b>Token Metrics</b>: ${pool.token_name} ${pool.token_symbol}\n
+                    <b>Presale Goals</b>: ${pool.softcap}${pool.accepted_currency}\n
+                    <b>Presale Stats</b>: ${tokenInformation.totalDepositAmount}${pool.accepted_currency} raised, ${tokenInformation.totalContributors} contributors\n
+                    <b>Post Presale Actions</b>: ${pool.router}\n
+                    <b>Links Media</b>: ${pool.websiteURL}\n
+                    <b>Presale Time</b>: ${formatDate(pool.startTime)} - ${formatDate(pool.endTime)}\n
+                    <b>Current Marketcap</b>: ${pool.marketCap}\n
+                    <b>Your contributions</b>":  ${tokenInfomationResult.contributionAmount}\n`;
+
+
+                    inlineKeyboardUserProject.text(
+                      "Back To Browse Projects",
+                      ""
+                    )
+                    inlineKeyboardUserProject.url(
+                      "Vie Current Price if ended (Link to Dextools)",
+                      "https://www.dextools.io/app/"
+                    )
+
+                    inlineKeyboardUserProject.text(
+                      "Contribute Now OR SEND",
+                      `Contribute_${pool.poolAddress}`
+                    )
+                    inlineKeyboardUserProject.text(
+                      "Emergency Withdraw",
+                      `EW_${pool.poolAddress}`
+                    )
+                    ctx.reply(returnText, { reply_markup: inlineKeyboardUserProject });
+                  } else {
+                    `Overview of Token\n
+                      <b>Project Description</b>: ${pool.description}\n
+                      <b>Token Metrics</b>: ${pool.token_name} ${pool.token_symbol}\n
+                      <b>Presale Goals</b>: ${pool.softcap}${pool.accepted_currency}\n
+                      <b>Presale Stats</b>: ${tokenInformation.totalDepositAmount}${pool.accepted_currency} raised, ${tokenInformation.totalContributors} contributors\n
+                      <b>Post Presale Actions</b>: ${pool.router}\n
+                      <b>Links Media</b>: ${pool.websiteURL}\n
+                      <b>Presale Time</b>: ${formatDate(pool.startTime)} - ${formatDate(pool.endTime)}\n
+                      <b>Current Marketcap</b>: ${pool.marketCap}\n
+                      <b>Your contributions</b>":  ${tokenInfomationResult.contributionAmount}\n`;
+
+                    inlineKeyboardUserProject.text(
+                      "Back To Browse Projects",
+                      ""
+                    )
+                    inlineKeyboardUserProject.url(
+                      "Vie Current Price if ended (Link to Dextools)",
+                      "https://www.dextools.io/app/"
+                    )
+                    inlineKeyboardUserProject.text(
+                      "Claim",
+                      `userClaim_${pool.poolAddress}`
+                    )
+                    ctx.reply(returnText, { reply_markup: inlineKeyboardUserProject });
+                  }
+                }
+              }
+            })
+            .catch((err) => {
+              console.log(err);
+            });
+        }
+      } else if (data.startsWith('editProjectDetails_')) {
+
+      } else if (data.startsWith('userClaim_')) {
+        const parts = data.split('userClaim_');
+        if (parts.length > 1) {
+          try {
+            const poolAddress = parts[1];
+            const session = getSession(ctx.from.id);
+            const privateKey = session.wallets[session.selectedWallet - 1];
+            // Setup provider with the private key
+            const provider = new HDWalletProvider({
+              privateKeys: [privateKey],
+              providerOrUrl: providerURL[session.chain],
+            });
+
+            const web3 = new Web3(provider);
+            const accounts = await web3.eth.getAccounts();
+            const sender = accounts[0];
+
+            const presaleContract = new web3.eth.Contract(fairlaunchAbi, poolAddress);
+            await presaleContract.methods.claim().send({ from: sender });
+            ctx.reply('✅ Claiming successfully submitted');
+          } catch (err) {
+            console.log('user claim!!', err);
+          }
+        } else {
+          console.log('wrong type user claim!!!');
+        }
+      } else if (data.startsWith('finalizeAddLP_')) {
+        let poolChain;
+        const session = getSession(ctx.from.id);
+        let startString = 'finalizeAddLP_Etherum_';
+        if (data.startsWith('finalizeAddLP_Ethereum_')) {
+          poolChain = 'Ethereum';
+        } else if (data.startsWith('finalizeAddLP_Binance_')) {
+          poolChain = 'Binance';
+          startString = 'finalizeAddLP_Binance_';
+        }
+
+        const parts = data.split(startString);
+        if (parts.length > 1) {
+          const poolAddress = parts[1];
+          try {
+            await finalizeAndAddLPFunc(session.walltes[session.selectedWallet - 1], poolAddress, poolChain);
+          } catch (err) {
+            console.log(err);
+            ctx.reply(`⚠️ Failed finalize!!!`)
+          }
+        } else {
+          ctx.reply(`⚠️ Failed finalize!!!`)
+        }
+      } else if (data.startsWith('refund_')) {
+        let poolChain;
+        const session = getSession(ctx.from.id);
+        let startString = 'refund_Etherum_';
+        if (data.startsWith('refund_Ethereum_')) {
+          poolChain = 'Ethereum';
+        } else if (data.startsWith('refund_Binance_')) {
+          poolChain = 'Binance';
+          startString = 'refund_Binance_';
+        }
+
+        const parts = data.split(startString);
+        if (parts.length > 1) {
+          const poolAddress = parts[1];
+          try {
+            await cancelAndRefundFunc(session.walltes[session.selectedWallet - 1], poolAddress, poolChain);
+          } catch (err) {
+            console.log(err);
+            ctx.reply(`⚠️ Failed refund!!!`)
+          }
+        } else {
+          ctx.reply(`⚠️ Failed refund!!!`)
+        }
       }
-    });
+    })
   } catch (err) {
     console.log(err);
   }

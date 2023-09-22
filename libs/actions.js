@@ -92,6 +92,8 @@ async function getPresaleInformation(presale_address, token_address, session) {
 
     const web3 = new Web3(provider);
 
+    const accounts = await web3.eth.getAccounts();
+    const sender = accounts[0];
     const presaleContract = new web3.eth.Contract(factoryABI, presale_address);
     const tokenAddress = await presaleContract.methods.tokenAddress().call({ from: sender });
 
@@ -112,6 +114,7 @@ async function getPresaleInformation(presale_address, token_address, session) {
     const startTime = await presaleContract.methods.startTime().call({ from: sender });
     const endTime = await presaleContract.methods.endTime().call({ from: sender });
     const maxContributionAmount = await presaleContract.methods.maxContributionAmount().call({ from: sender });
+    const isFinalized = await presaleContract.methods.isFinalized().call({from : sender});
     return {
       tokenAddress,
       name,
@@ -128,6 +131,7 @@ async function getPresaleInformation(presale_address, token_address, session) {
       totalContributors,
       liquidityRatio,
       marketCap,
+      isFinalized,
       contributionAmount: userRes._amount
     };
   } catch (err) {

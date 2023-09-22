@@ -1,4 +1,4 @@
-const Web3 = require('web3');
+const {Web3} = require('web3');
 const tokenAbi = require('../abis/tokenAbi');  // Assuming ABI is in the same directory
 
 const providerURL = {
