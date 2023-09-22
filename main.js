@@ -15,7 +15,7 @@ const {
   isValidDate,
 } = require("./libs/validators");
 const { ownerMenuData, userMenuData } = require("./libs/menuDatas");
-const replyReviewLaunch = require("./libs/actions");
+const { replyReviewLaunch, getPresaleInformation } = require("./libs/actions");
 const getTotalBalance = require("./libs/walletFuncs");
 const HDWalletProvider = require("@truffle/hdwallet-provider");
 // ERC-20 Token ABI with only the necessary parts for fetching name and symbol
@@ -86,7 +86,8 @@ const OwnerInfo = mongoose.model("OwnerInfo", ownerInfoSchema);
 const bot = new Bot(process.env.BOT_TOKEN);
 
 const sessions = {};
-function formatDate(date) {
+function formatDate(date1) {
+  const date = new Date(date1*1000);
   const year = date.getFullYear();
 
   // JavaScript's getMonth() function returns month index starting from 0 (0 = January, 1 = February, ...)
@@ -938,40 +939,6 @@ async function waitForTransactionReceipt(txHash, session) {
   });
 }
 
-async function getPresaleInformation(presale_address, token_address, session) {
-  try {
-
-    const privateKey = session.wallets[session.selectedWallet - 1];
-    // Setup provider with the private key
-    const provider = new HDWalletProvider({
-      privateKeys: [privateKey],
-      providerOrUrl: providerURL[session.chain],
-    });
-
-    const web3 = new Web3(provider);
-
-    const presaleContract = new web3.eth.Contract(factoryABI, presale_address);
-    const sellAmount = await presaleContract.methods.sellAmount().call({ from: sender });
-    const softCap = await presaleContract.methods.softCap().call({ from: sender });
-    const totalRaises = await presaleContract.methods.totalDepositAmount().call({ from: sender });
-    const totalContributors = await presaleContract.methods.totalContributors().call({ from: sender });
-    const liquidityRatio = await presaleContract.methods.calcCurrentRate().call({ from: sender });
-    const marketCap = await presaleContract.methods.calcInitialMarketCapInToken().call({ from: sender });
-    const userRes = await presaleContract.methods.user(sender).call({ from: sender });
-    return {
-      sellAmount,
-      softCap,
-      totalRaises,
-      totalContributors,
-      liquidityRatio,
-      marketCap,
-      contributionAmount: userRes._amount
-    };
-  } catch (err) {
-    console.log(err);
-  }
-}
-
 // Your private key (make sure not to expose this in your code or anywhere public)
 
 async function launchPool(privateKey, session, username) {
@@ -1444,19 +1411,19 @@ async function mainFunc() {
         const parts = data.split("ownerwallet_");
         if (parts.length > 1) {
           const inlineKeyboardOwnerWallet = new InlineKeyboard()
-          // TODO : should indicate same callback data as my presale menu
-          .text('My presales', ``)
-          // TODO : should indiciate same callback data as fair launch menu
-          .text('Start a Fair Launch', ``)
-          .row()
-          .text('Remove Wallet', `removeWallet_${session.wallets[session.selectedWallet - 1]}`)
-          // TODO : should indicate same callback data as deposit menu
-          .text('Deposit', ``)
-          .row()
-          // TODO : should indicate same callback data as send menu
-          .text('Send Menu', ``)
-          .text('Show Private Key', `showPrivateKey_${session.wallets[session.selectedWallet - 1]}`)
-          .row()
+            // TODO : should indicate same callback data as my presale menu
+            .text('My presales', ``)
+            // TODO : should indiciate same callback data as fair launch menu
+            .text('Start a Fair Launch', ``)
+            .row()
+            .text('Remove Wallet', `removeWallet_${session.wallets[session.selectedWallet - 1]}`)
+            // TODO : should indicate same callback data as deposit menu
+            .text('Deposit', ``)
+            .row()
+            // TODO : should indicate same callback data as send menu
+            .text('Send Menu', ``)
+            .text('Show Private Key', `showPrivateKey_${session.wallets[session.selectedWallet - 1]}`)
+            .row()
 
           ctx.answerCallbackQuery({ text: "Pressed Wallet " + parts[1] + "!" });
           const session = getSession(ctx.from.id);
@@ -1465,7 +1432,7 @@ async function mainFunc() {
 
           const addressHex = getCurrentWalletPublicKey(session);
 
-          ctx.reply("Current User Wallet's Information : " + addressHex, {reply_markup : inlineKeyboardOwnerWallet});
+          ctx.reply("Current User Wallet's Information : " + addressHex, { reply_markup: inlineKeyboardOwnerWallet });
         }
       }
       else if (data.startsWith("userwallet_")) {
@@ -1479,28 +1446,62 @@ async function mainFunc() {
           const addressHex = getCurrentWalletPublicKey(session);
 
           const inlineKeybardUserWallet = new InlineKeyboard()
-          .text('Contributions & Claim', `userContributionAndClaim_${session.wallets[session.selectedWallet - 1]}`)
-          .text('Show Private Key', `showPrivateKey_${session.wallets[session.selectedWallet - 1]}`)
-          .row()
-          .text('Remove Wallet', `removeWallet_${session.wallets[session.selectedWallet - 1]}`)
-          .text('Deposit', `deposit_${session.wallets[session.selectedWallet - 1]}`)
-          .row()
-          // TODO : Send should be similar to Deployer Bot
-          .text('Send', ``)
+            .text('Contributions & Claim', `userContributionAndClaim_${session.wallets[session.selectedWallet - 1]}`)
+            .text('Show Private Key', `showPrivateKey_${session.wallets[session.selectedWallet - 1]}`)
+            .row()
+            .text('Remove Wallet', `removeWallet_${session.wallets[session.selectedWallet - 1]}`)
+            .text('Deposit', `deposit_${session.wallets[session.selectedWallet - 1]}`)
+            .row()
+            // TODO : Send should be similar to Deployer Bot
+            .text('Send', ``)
 
-          ctx.reply("Current Owner Wallet's Information : " + addressHex, {reply_markup : inlineKeybardUserWallet});
+          ctx.reply("Current Owner Wallet's Information : " + addressHex, { reply_markup: inlineKeybardUserWallet });
         }
       } else if (data.startsWith("ongoing")) {
         const parts = data.split("ongoing");
         if (parts.length > 1) {
           const poolAddress = parts[1];
-          ctx.reply(`The ongoing pool is ${poolAddress}`);
+          PoolInfo.find({ poolAddress: poolAddress })
+            .then(async (pools) => {
+              if (pools.length > 0) {
+                const session = getSession(ctx.from.id);
+                const replyInlineKeyboard = new InlineKeyboard()
+                  .text('Refresh Data : ', `ongoing_${poolAddress}`)
+                  // TODO : editProjectDetail_
+                  .text('Edit project details', `editProjectDetail_${poolAddress}`)
+                  .row()
+                  //TODO : finalizeAddLP_
+                  .text('Finalize & Add LP', `finalizeAddLP_${poolAddress}`)
+                  //TODO : cancelRefund_
+                  .text('Cancel & Refund', `cancelRefund_${poolAddress}`);
+
+                const tokenInfomationResult = getPresaleInformation(poolAddress, poolAddress, session);
+                await showInformationAboutProjectOwner(pools[0], ctx, tokenInfomationResult, session, replyInlineKeyboard);
+                // ctx.reply(`The ongoing pool is ${poolAddress}`);
+              }
+            })
+            .catch((err) => {console.log(err); ctx.reply(`Wrong address inputed`)});
         }
       } else if (data.startsWith("finished")) {
         const parts = data.split("finished");
         if (parts.length > 1) {
           const poolAddress = parts[1];
-          ctx.reply(`The finished pool is ${poolAddress}`);
+          PoolInfo.find({ poolAddress: poolAddress })
+            .then(async (pools) => {
+              if (pools.length > 0) {
+                const session = getSession(ctx.from.id);
+                const replyInlineKeyboard = new InlineKeyboard()
+                  .text('Refund', `refund_${poolAddress}`)
+                  .row()
+                  //TODO : finalizeAddLP_
+                  .text('Finalize & Add LP', `finalizeAddLP_${poolAddress}`)
+
+                const tokenInfomationResult = getPresaleInformation(poolAddress, poolAddress, session);
+                await showInformationAboutProjectOwner(pools[0], ctx, tokenInfomationResult, session, replyInlineKeyboard);
+                // ctx.reply(`The ongoing pool is ${poolAddress}`);
+              }
+            })
+            .catch((err) => {console.log(err); ctx.reply(`Wrong address inputed`)});
         }
       } else if (data.startsWith("Contribute_")) {
         const parts = data.split("Contribute_");
