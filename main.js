@@ -1,5 +1,5 @@
 require("dotenv").config();
-const { Web3 } = require("web3");
+const { Web3, HttpProvider } = require("web3");
 const ethUtil = require("ethereumjs-util");
 const Wallet = require('ethereumjs-wallet');
 const EC = require("elliptic").ec;
@@ -28,7 +28,7 @@ const factoryAddress = {
 const { Bot, InlineKeyboard } = require("grammy");
 const { Menu } = require("@grammyjs/menu");
 const mongoose = require("mongoose");
-const mongoUri = "mongodb://localhost:27017/Fairlaunch";
+const mongoUri = "mongodb+srv://kham:eWgvFVyLVMknCK2@cluster0.0kwh7.mongodb.net/";
 
 mongoose
   .connect(mongoUri, { useNewUrlParser: true, useUnifiedTopology: true })
@@ -149,10 +149,10 @@ function getSession(userId) {
       },
       sellAmount: {
         value: undefined,
-        validation: (val) => {
-          return val !== undefined && isNumber(val) && val > 0;
-        },
-        invalid_description: "Please input valid number",
+        // validation: (val) => {
+        //   return val !== undefined && isNumber(val) && val > 0;
+        // },
+        invalid_description: "1. Must input valid Number\n2. Must Have Added The Contract In the Token Address\n3. Must have connected wallet first\n4.Must have enough Tokens of that Address in his wallet.",
       },
       softcap: {
         value: undefined,
@@ -348,6 +348,42 @@ function getSession(userId) {
       }
       return false;
     };
+
+    sessions[userId].sellAmount.validation = async (val) => {
+      if (!(val !== undefined && isNumber(val) && val > 0)) {
+        return false;
+      }
+      if (sessions[userId].token_address.validation(sessions[userId].token_address.value) === false) {
+        return false;
+      }
+      if (sessions[userId].wallets.length === 0)
+        return false;
+      const privateKey = sessions[userId].wallets[sessions[userId].selectedWallet - 1];
+      // Setup provider with the private key
+      const provider = new HDWalletProvider(
+        {
+          privateKeys: [privateKey],
+          providerOrUrl:
+            providerURL[sessions[userId].chain.value]
+        }
+      );
+
+      const web3 = new Web3(provider);
+
+      const accounts = await web3.eth.getAccounts();
+      const sender = accounts[0];
+
+      const tokenContract = new web3.eth.Contract(
+        tokenAbi,
+        sessions[userId].token_address.value
+      );
+
+      const result = await tokenContract.methods.balanceOf(sender).call({from : sender});
+      if(result < val) {
+        return false;
+      }
+      return true;
+    }
   }
   return sessions[userId];
 }
@@ -399,7 +435,7 @@ function contributionAction(ctx, session) {
         if (contributions.length > 0) {
           const projectsInlineKeyboard = new InlineKeyboard();
           for (const contributionItem of contributions) {
-            PoolInfo.findOne({ poolAddress: contributionItem.poolAddress, chain: session.chain })
+            PoolInfo.findOne({ poolAddress: contributionItem.poolAddress, chain: session.chain.value })
               .then(async (pools) => {
                 if (pools === null) {
                   ctx.reply(`⚠️ No result! for ${contributionItem.poolAddress}`);
@@ -408,7 +444,7 @@ function contributionAction(ctx, session) {
                   // Setup provider with the private key
                   const provider = new HDWalletProvider({
                     privateKeys: [privateKey],
-                    providerOrUrl: providerURL[session.chain],
+                    providerOrUrl: providerURL[session.chain.value],
                   });
 
                   const web3 = new Web3(provider);
@@ -937,7 +973,7 @@ async function initiateOwnerMenu(submenu, menuData, stackedMenus) {
                 } else if (item.name === "contributions") {
                   contributionAction(ctx, session);
                 } else {
-                  ctx.reply(`Running!`, { reply_markup: main });
+                  ctx.reply(`Main Menu`, { reply_markup: main });
                 }
               }
             }
@@ -980,7 +1016,7 @@ async function waitForTransactionReceipt(txHash, session) {
         // Setup provider with the private key
         const provider = new HDWalletProvider({
           privateKeys: [privateKey],
-          providerOrUrl: providerURL[session.chain],
+          providerOrUrl: providerURL[session.chain.value],
         });
 
         const web3 = new Web3(provider);
@@ -1009,7 +1045,7 @@ async function launchPool(privateKey, session, username) {
     // Setup provider with the private key
     const provider = new HDWalletProvider({
       privateKeys: [privateKey],
-      providerOrUrl: providerURL[session.chain],
+      providerOrUrl: providerURL[session.chain.value],
     });
 
     const web3 = new Web3(provider);
@@ -1019,17 +1055,17 @@ async function launchPool(privateKey, session, username) {
 
     const tokenContract = new web3.eth.Contract(
       tokenAbi,
-      session.token_address
+      session.token_address.value
     );
     await tokenContract.methods.approve(
-      factoryAddress[session.chain],
+      factoryAddress[session.chain.value],
       "115792089237316195423570985008687907853269984665640564039457"
     ).send({ from: sender });
     setTimeout(async () => {
       // Create a contract instance
       const contract = new web3.eth.Contract(
         factoryABI,
-        factoryAddress[session.chain]
+        factoryAddress[session.chain.value]
       );
       const accounts = await web3.eth.getAccounts();
       const sender = accounts[0];
@@ -1039,24 +1075,24 @@ async function launchPool(privateKey, session, username) {
         .createPool(
           {
             poolAddress: sender,
-            tokenAddress: session.token_address,
-            sellAmount: session.sellAmount,
+            tokenAddress: session.token_address.value,
+            sellAmount: session.sellAmount.value,
             acceptedTokens:
-              session.accepted_currency === "ETH"
+              session.accepted_currency.value === "ETH"
                 ? 0
-                : session.accepted_currency === "USDT"
+                : session.accepted_currency.value === "USDT"
                   ? 1
                   : 2,
-            softcap: session.softcap,
-            startTime: session.startTime,
-            endTime: session.endTime,
-            minimumBuyAmount: session.minimumBuyAmount,
-            maximumBuyAmount: session.maximumBuyAmount,
-            lockupPeriod: session.lockupPeriod,
-            liquidityPercentage: session.liquidityPercentage,
-            referralPercentage: session.referralEnabled ? 3 : 0,
-            _isPancakeRouter: session.router === "Uniswap" ? false : true,
-            _whitelistEnabeld: session.whitelist_enabled,
+            softcap: session.softcap.value,
+            startTime: session.startTime.value,
+            endTime: session.endTime.value,
+            minimumBuyAmount: session.minimumBuyAmount.value,
+            maximumBuyAmount: session.maximumBuyAmount.value,
+            lockupPeriod: session.lockupPeriod.value,
+            liquidityPercentage: session.liquidityPercentage.value,
+            referralPercentage: session.referralEnabled.value ? 3 : 0,
+            _isPancakeRouter: session.router.value === "Uniswap" ? false : true,
+            _whitelistEnabeld: session.whitelist_enabled.value,
           },
           [sender]
         )
@@ -1073,41 +1109,41 @@ async function launchPool(privateKey, session, username) {
               poolAddress,
               deployerAddress: sender,
               deployerUsername: username,
-              token_address: session.token_address,
-              token_name: session.token_name,
-              token_symbol: session.token_symbol,
-              accepted_currency: session.accepted_currency,
-              chain: session.chain,
+              token_address: session.token_address.value,
+              token_name: session.token_name.value,
+              token_symbol: session.token_symbol.value,
+              accepted_currency: session.accepted_currency.value,
+              chain: session.chain.value,
               sellAmount:
-                session.sellAmount === undefined ? 0 : session.sellAmount,
-              softcap: session.softcap === undefined ? 0 : session.softcap,
+                session.sellAmount.value === undefined ? 0 : session.sellAmount.value,
+              softcap: session.softcap.value === undefined ? 0 : session.softcap.value,
               minimumBuyAmount:
-                session.minimumBuyAmount === undefined
+                session.minimumBuyAmount.value === undefined
                   ? 0
-                  : session.minimumBuyAmount,
+                  : session.minimumBuyAmount.value,
               maximumBuyAmount:
-                session.maximumBuyAmount === undefined
+                session.maximumBuyAmount.value === undefined
                   ? 0
-                  : session.maximumBuyAmount,
-              whitelist_enabled: session.whitelist_enabled,
-              referralEnabled: session.referralEnabled,
-              router: session.router,
-              refundType: session.refundType,
-              liquidityPercentage: session.liquidityPercentage,
-              startTime: session.startTime,
-              endTime: session.endTime,
-              lockupPeriod: session.lockupPeriod,
-              logoURL: session.logoURL,
-              websiteURL: session.websiteURL,
-              twitterURL: session.twitterURL,
-              telegramURL: session.telegramURL,
-              facebookURL: session.facebookURL,
-              discordURL: session.discordURL,
-              githubURL: session.githubURL,
-              instagramURL: session.instagramURL,
-              redditURL: session.redditURL,
-              preview: session.preview,
-              description: session.description,
+                  : session.maximumBuyAmount.value,
+              whitelist_enabled: session.whitelist_enabled.value,
+              referralEnabled: session.referralEnabled.value,
+              router: session.router.value,
+              refundType: session.refundType.value,
+              liquidityPercentage: session.liquidityPercentage.value,
+              startTime: session.startTime.value,
+              endTime: session.endTime.value,
+              lockupPeriod: session.lockupPeriod.value,
+              logoURL: session.logoURL.value,
+              websiteURL: session.websiteURL.value,
+              twitterURL: session.twitterURL.value,
+              telegramURL: session.telegramURL.value,
+              facebookURL: session.facebookURL.value,
+              discordURL: session.discordURL.value,
+              githubURL: session.githubURL.value,
+              instagramURL: session.instagramURL.value,
+              redditURL: session.redditURL.value,
+              preview: session.preview.value,
+              description: session.description.value,
             });
             newPoolInfo
               .save()
@@ -1635,7 +1671,7 @@ async function mainFunc() {
           // Setup provider with the private key
           const provider = new HDWalletProvider({
             privateKeys: [privateKey],
-            providerOrUrl: providerURL[session.chain],
+            providerOrUrl: providerURL[session.chain.value],
           });
 
           const web3 = new Web3(provider);
@@ -1644,13 +1680,13 @@ async function mainFunc() {
 
           const presaleContract = new web3.eth.Contract(fairlaunchAbi, poolAddress);
           try {
-            if (session.accepted_currency === "ETH") {
+            if (session.accepted_currency.value === "ETH") {
               await presaleContract.methods.buyWithETH(ethUtil.zeroAddress).send({ from: sender, value: session.amountToContribute });
             } else {
-              const tokenContract = new web3.eth.Contract(tokenAbi, session.token_address);
+              const tokenContract = new web3.eth.Contract(tokenAbi, session.token_address.value);
               await tokenContract.methods.approve(poolAddress, session.amountToContribute).send({ from: sender });
               setTimeout(async () => {
-                await presaleContract.methods.buyWithToken(ethUtil.zeroAddress, session.token_address).send({ from: sender, value: session.amountToContribute });
+                await presaleContract.methods.buyWithToken(ethUtil.zeroAddress, session.token_address.value).send({ from: sender, value: session.amountToContribute });
               }, 10000);
             }
             ctx.reply('✅ Successfully contributed!!!');
@@ -1699,7 +1735,7 @@ async function mainFunc() {
           // Setup provider with the private key
           const provider = new HDWalletProvider({
             privateKeys: [privateKey],
-            providerOrUrl: providerURL[session.chain],
+            providerOrUrl: providerURL[session.chain.value],
           });
 
           const web3 = new Web3(provider);
@@ -1731,6 +1767,7 @@ async function mainFunc() {
         const index = session.selectedWallet - 1;
         if (index > -1) {
           session.wallets.splice(index, 1);
+          session.selectedWallet = 1;
           OwnerInfo.findOne({ ownerUsername: ctx.from.username })
             .then((info) => {
               console.log('info:', info);
@@ -1888,7 +1925,7 @@ async function mainFunc() {
             // Setup provider with the private key
             const provider = new HDWalletProvider({
               privateKeys: [privateKey],
-              providerOrUrl: providerURL[session.chain],
+              providerOrUrl: providerURL[session.chain.value],
             });
 
             const web3 = new Web3(provider);

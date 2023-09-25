@@ -63,9 +63,9 @@ async function replyReviewLaunch(ctx, session, launchInlineKeyboard) {
     const gwei = await fetchCurrentGwei();
     textOutput += "------------------------------\n";
     textOutput += `GWei: ${gwei.toFixed(2)}\n`;
-    textOutput += `Deploy cost: 0.23 ${session.chain === "Binance" ? "BNB" : "ETH"}\n`;
-    textOutput += `Service Fee: 0.01 ${session.chain === "Binance" ? "BNB" : "ETH"}\n`;
-    textOutput += `Total: 0.24 ${session.chain === "Binance" ? "BNB" : "ETH"}\n`;
+    textOutput += `Deploy cost: 0.23 ${session.chain.value === "Binance" ? "BNB" : "ETH"}\n`;
+    textOutput += `Service Fee: 0.01 ${session.chain.value === "Binance" ? "BNB" : "ETH"}\n`;
+    textOutput += `Total: 0.24 ${session.chain.value === "Binance" ? "BNB" : "ETH"}\n`;
     ctx.reply(textOutput, {
       parse_mode: "HTML",
       reply_markup: launchInlineKeyboard,
@@ -87,7 +87,7 @@ async function getPresaleInformation(presale_address, token_address, session) {
     // Setup provider with the private key
     const provider = new HDWalletProvider({
       privateKeys: [privateKey],
-      providerOrUrl: providerURL[session.chain],
+      providerOrUrl: providerURL[session.chain.value],
     });
 
     const web3 = new Web3(provider);

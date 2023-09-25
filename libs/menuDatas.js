@@ -148,7 +148,7 @@ const ownerMenuData = [
     submenu: [
       { text: "Claim Settings", name: "claim-settings" },
       { text: "Refund Menu", name: "refund-menu", isRow: true },
-      { text: "Finalize Presale", name: "finalze-presale", isLast: true },
+      { text: "Finalize Presale", name: "finalize-presale", isLast: true },
     ],
     isLast: true,
   },
