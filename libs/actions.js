@@ -33,7 +33,7 @@ async function fetchCurrentGwei() {
   }
 }
 
-async function replyReviewLaunch(ctx, session, launchInlineKeyboard) {
+async function replyReviewLaunch(ctx, session, launchInlineKeyboard, isLaunch) {
   try {
     const fields = Object.keys(session);
     let textOutput = "";
@@ -43,20 +43,20 @@ async function replyReviewLaunch(ctx, session, launchInlineKeyboard) {
         session[fieldItem].hasOwnProperty("validation") &&
         fieldItem !== "importedWallet"
       ) {
-        if (session[fieldItem].value !== undefined) {
+        if (session[fieldItem].value !== undefined && session[fieldItem].value !== '') {
           if (fieldItem === "startTime" || fieldItem === "endTime") {
-            const date = new Date(session[fieldItem].value * 1000);
-            const stringOfDate = formatDate(date);
-            textOutput += `${fieldItem}: <b>${stringOfDate}</b>\n`;
+            const stringOfDate = formatDate(session[fieldItem].value);
+            textOutput += `✔️ ${fieldItem}: <b>${stringOfDate}</b>\n`;
           } else {
             if (typeof session[fieldItem].value !== "boolean")
-              textOutput += `${fieldItem}: <b>${session[fieldItem].value}</b>\n`;
+              textOutput += `✔️ ${fieldItem}: <b>${session[fieldItem].value}</b>\n`;
             else
               textOutput += `${fieldItem}: ${session[fieldItem].value ? "✅" : "🚫"
                 }\n`;
           }
         } else {
-          textOutput += `${fieldItem} : <b>Not Set</b>\n`;
+          if (isLaunch === true)
+            textOutput += `${fieldItem} : <b>Not Set</b>\n`;
         }
       }
     }
@@ -114,7 +114,7 @@ async function getPresaleInformation(presale_address, token_address, session) {
     const startTime = await presaleContract.methods.startTime().call({ from: sender });
     const endTime = await presaleContract.methods.endTime().call({ from: sender });
     const maxContributionAmount = await presaleContract.methods.maxContributionAmount().call({ from: sender });
-    const isFinalized = await presaleContract.methods.isFinalized().call({from : sender});
+    const isFinalized = await presaleContract.methods.isFinalized().call({ from: sender });
     return {
       tokenAddress,
       name,
@@ -141,7 +141,7 @@ async function getPresaleInformation(presale_address, token_address, session) {
 
 async function showInformationAboutProjectOwner(poolData, ctx, tokenInfomationResult, session, replyInlineKeyboard) {
   const outPutText = `<b>Project Information</b>\n  ----name: <b>${tokenInfomationResult.name}</b>\n  ----symbol: <b>${tokenInfomationResult.symbol}</b>\n  ----supply: <b>${tokenInfomationResult.supply}</b>\n${poolData.websiteURL ? '  ----website: <b>' + poolData.websiteURL + '</b>\n' : ''}${poolData.twitterURL ? '  ----twitter: <b>' + poolData.twitterURL + '</b>\n' : ''}${poolData.telegramURL ? '  ----telegram: <b>' + poolData.telegramURL + '</b>\n' : ''}${poolData.facebookURL ? '  ----facebook: <b>' + poolData.facebookURL + '</b>\n' : ''}${poolData.discordURL ? '  ----discord: <b>' + poolData.discordURL + '</b>\n' : ''}${poolData.githubURL ? '  ----github: <b>' + poolData.githubURL + '</b>\n' : ''}${poolData.instagramURL ? '  ----instagram: <b>' + poolData.instagramURL + '</b>\n' : ''}${poolData.redditURL ? '  ----reddit: <b>' + poolData.redditURL + '</b>\n' : ''}<b>Financial Metrics</b>\n  ----Funds Raised: <b>${tokenInfomationResult.totalRaises}${poolData.accepted_currency}</b>\n  ----Currency Used: <b>${tokenInfomationResult.accepted_currency}</b>\n<b>Presale Progress & Metrics</b>\n  ----Tokens Supplied: <b>${tokenInfomationResult.sellAmount}</b>\n  ----Softcap: <b>${tokenInfomationResult.softCap}</b>\n  ----Minimum Buy Amount: <b>${tokenInfomationResult.minimumBuyAmount ? tokenInfomationResult.minimumBuyAmount + poolData.accepted_currency : 'Not set'}</b>\n  ----Maximum Buy Amount: <b>${tokenInfomationResult.maximumBuyAmount ? tokenInfomationResult.maximumBuyAmount + poolData.maximumBuyAmount : 'Not Set'}</b>\n<b>Timeline & Status</b>\n  ----Launch Start Time: <b>${formatDate(tokenInfomationResult.startTime)}</b>\n  ----Launch End Time: <b>${formateDate(tokenInfomationResult.endTime)}</b>\n<b>Investors Insight</b>\n  ----Total Participants: <b>${tokenInfomationResult.totalContributors}</b>\n  ----Biggest Contribution: <b>${tokenInfomationResult.maxContributionAmount}${poolData.accepted_currency}</b>\n  ----Average Contribution: <b>${Number(tokenInfomationResult.totalDepositAmount / tokenInfomationResult.totalContributors).toFixed(4)}${poolData.accepted_currency}</b>\n<b>Post Launch Information</b>\n  ----Router For Listing: <b>${poolData.router}</b>\n  ----Liquidity Percentage: <b>${poolData.liquidityPercentage}%</b>\n`
-  ctx.reply(outPutText, {parse_mode:'HTML', reply_markup:replyInlineKeyboard});
+  ctx.reply(outPutText, { parse_mode: 'HTML', reply_markup: replyInlineKeyboard });
 }
 
 module.exports = { replyReviewLaunch, getPresaleInformation };

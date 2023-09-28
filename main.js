@@ -25,6 +25,12 @@ const factoryAddress = {
   Ethereum: "0xEc0621b3c82E0921DFF4e2E6F9f415dB42666368",
 };
 
+// Your Ethereum node's RPC URL (could be local, Infura, Alchemy, etc.)
+const providerURL = {
+  Binance: "https://bsc-testnet.publicnode.com",
+  Ethereum: "https://goerli.infura.io/v3/81f1f856e5854cda96f939fe2a658c40",
+};
+
 const { Bot, InlineKeyboard } = require("grammy");
 const { Menu } = require("@grammyjs/menu");
 const mongoose = require("mongoose");
@@ -114,9 +120,6 @@ function getSession(userId) {
     sessions[userId] = {
       token_address: {
         value: undefined,
-        validation: (val) => {
-          return isValidEthereumAddress(val);
-        },
         invalid_description: "Please input valid token address",
       },
       token_name: {
@@ -134,14 +137,14 @@ function getSession(userId) {
         invalid_description: "Please input valid token symbol",
       },
       accepted_currency: {
-        value: "ETH",
+        value: "BNB",
         validation: (val) => {
           return true;
         },
         invalid_description: "Please input valid currency",
       }, // ETH USDT BLAZEX
       chain: {
-        value: "Ethereum",
+        value: "Binance",
         validation: (val) => {
           return true;
         },
@@ -246,70 +249,79 @@ function getSession(userId) {
         validation: (val) => {
           return val !== undefined && isValidURL(val) && val.length > 0;
         },
-        invalid_description: "Please input valid URL",
+        isURL: true,
+        invalid_description: "You need use https://",
       },
       websiteURL: {
         value: "",
         validation: (val) => {
           return val !== undefined && isValidURL(val);
         },
-        invalid_description: "Please input valid URL",
+        isURL: true,
+        invalid_description: "You need use https://",
       },
       twitterURL: {
         value: "",
         validation: (val) => {
           return val !== undefined && isValidURL(val);
         },
-        invalid_description: "Please input valid URL",
+        isURL: true,
+        invalid_description: "You need use https://",
       },
       telegramURL: {
         value: "",
         validation: (val) => {
           return val !== undefined && isValidURL(val);
         },
-        invalid_description: "Please input valid URL",
+        isURL: true,
+        invalid_description: "You need use https://",
       },
       facebookURL: {
         value: "",
         validation: (val) => {
           return val !== undefined && isValidURL(val);
         },
-        invalid_description: "Please input valid URL",
+        isURL: true,
+        invalid_description: "You need use https://",
       },
       discordURL: {
         value: "",
         validation: (val) => {
           return val !== undefined && isValidURL(val);
         },
-        invalid_description: "Please input valid URL",
+        isURL: true,
+        invalid_description: "You need use https://",
       },
       githubURL: {
         value: "",
         validation: (val) => {
           return val !== undefined && isValidURL(val);
         },
-        invalid_description: "Please input valid URL",
+        isURL: true,
+        invalid_description: "You need use https://",
       },
       instagramURL: {
         value: "",
         validation: (val) => {
           return val !== undefined && isValidURL(val);
         },
-        invalid_description: "Please input valid URL",
+        isURL: true,
+        invalid_description: "You need use https://",
       },
       redditURL: {
         value: "",
         validation: (val) => {
           return val !== undefined && isValidURL(val);
         },
-        invalid_description: "Please input valid URL",
+        isURL: true,
+        invalid_description: "You need use https://",
       },
       preview: {
         value: "",
         validation: (val) => {
           return val !== undefined && isValidURL(val);
         },
-        invalid_description: "Please input valid URL",
+        invalid_description: "You need use https://",
       },
       description: {
         value: "",
@@ -330,6 +342,38 @@ function getSession(userId) {
       isExpectingAnswer: "",
       selectedWallet: 1,
     };
+    sessions[userId].token_address.validation = async (val) => {
+      if (val === undefined || isValidEthereumAddress(val) === false) {
+        sessions[userId].token_address.invalid_description = "⚠️ Please input valid address";
+        return false;
+      }
+      console.log("valid address");
+      const privateKey = sessions[userId].wallets[sessions[userId].selectedWallet - 1];
+      // Setup provider with the private key
+      const provider = new HDWalletProvider(
+        {
+          privateKeys: [privateKey],
+          providerOrUrl:
+            providerURL[sessions[userId].chain.value]
+        }
+      );
+
+      const web3 = new Web3(provider);
+
+      const sender = getCurrentWalletPublicKey(sessions[userId]);
+
+      const tokenContract = new web3.eth.Contract(
+        tokenAbi,
+        val
+      );
+      const result = await tokenContract.methods.balanceOf(sender).call({ from: sender });
+      if (result == 0 || result === '0n') {
+        sessions[userId].token_address.invalid_description = "⚠️ The contract exists, but you don't have any tokens in your wallet.";
+        return false;
+      }
+
+      return true;
+    }
     sessions[userId].endTime.validation = (val) => {
       if (isNumber(val)) {
         return (
@@ -350,37 +394,44 @@ function getSession(userId) {
     };
 
     sessions[userId].sellAmount.validation = async (val) => {
-      if (!(val !== undefined && isNumber(val) && val > 0)) {
+      if (val === undefined || isNumber(val) === false || val <= 0) {
+        sessions[userId].sellAmount.invalid_description = "⚠️ Please input valid number";
         return false;
       }
-      if (sessions[userId].token_address.validation(sessions[userId].token_address.value) === false) {
+      else if (sessions[userId].token_address.value === undefined) {
+        sessions[userId].sellAmount.invalid_description = "⚠️ Must have added the contract in the Token Address";
         return false;
       }
-      if (sessions[userId].wallets.length === 0)
+      else if (sessions[userId].wallets.length === 0) {
+        sessions[userId].sellAmount.invalid_description = "⚠️ Must have connected wallet first!";
         return false;
-      const privateKey = sessions[userId].wallets[sessions[userId].selectedWallet - 1];
-      // Setup provider with the private key
-      const provider = new HDWalletProvider(
-        {
-          privateKeys: [privateKey],
-          providerOrUrl:
-            providerURL[sessions[userId].chain.value]
+      }
+      else {
+        const privateKey = sessions[userId].wallets[sessions[userId].selectedWallet - 1];
+        // Setup provider with the private key
+        const provider = new HDWalletProvider(
+          {
+            privateKeys: [privateKey],
+            providerOrUrl:
+              providerURL[sessions[userId].chain.value]
+          }
+        );
+
+        const web3 = new Web3(provider);
+        const sender = getCurrentWalletPublicKey(sessions[userId]);
+
+        const tokenContract = new web3.eth.Contract(
+          tokenAbi,
+          sessions[userId].token_address.value
+        );
+
+        const result = await tokenContract.methods.balanceOf(sender).call({ from: sender });
+        if (result < val) {
+          sessions[userId].sellAmount.invalid_description = "⚠️ Must have enough tokens of that address in his wallet";
+          return false;
         }
-      );
-
-      const web3 = new Web3(provider);
-
-      const accounts = await web3.eth.getAccounts();
-      const sender = accounts[0];
-
-      const tokenContract = new web3.eth.Contract(
-        tokenAbi,
-        sessions[userId].token_address.value
-      );
-
-      const result = await tokenContract.methods.balanceOf(sender).call({from : sender});
-      if(result < val) {
-        return false;
+        sessions[userId].sellAmount.invalid_description = "1. Must input valid Number\n2. Must Have Added The Contract In the Token Address\n3. Must have connected wallet first\n4.Must have enough Tokens of that Address in his wallet.";
+        return true;
       }
       return true;
     }
@@ -466,7 +517,6 @@ function contributionAction(ctx, session) {
         }
       })
       .catch(err => { console.log(err); ctx.reply(`⚠️ Failed fetching contributions`) })
-    const inlineKeyboardProject = new InlineKeyboard().text();
   }
 }
 
@@ -485,6 +535,7 @@ async function initiateOwnerMenu(submenu, menuData, stackedMenus) {
     for (const item of menuData) {
       if ("submenu" in item) {
         const menu1 = new Menu(item.name);
+        
         await initiateOwnerMenu(menu1, item.submenu, []);
         submenu.submenu(item.text, item.name);
         stackedMenus.push(menu1);
@@ -503,6 +554,18 @@ async function initiateOwnerMenu(submenu, menuData, stackedMenus) {
               (ctx) => {
                 if (ctx.from) {
                   const session = getSession(ctx.from.id);
+                  if (item.name === "payment-currency") {
+                    const session = getSession(ctx.from.id);
+                    if (session.chain.value === "Binance") {
+                      if (selectOption === 'ETH' && session[item.variable].value === 'BNB') {
+                        return "✅ " + 'BNB';
+                      }
+                    } else {
+                      if (selectOption === 'BNB' && session[item.variable].value === 'ETH') {
+                        return "✅ " + 'ETH';
+                      }
+                    }
+                  }
                   if (session[item.variable].value === selectOption) {
                     return "✅ " + selectOption;
                   }
@@ -538,9 +601,11 @@ async function initiateOwnerMenu(submenu, menuData, stackedMenus) {
               }
               return item.text;
             },
-            (ctx) => {
+            async (ctx) => {
               if ("type" in item && item.type === "launch") {
                 const session = getSession(ctx.from.id);
+
+                if(await session.token_address.validation(session.token_address.value) === true){
                 const walletPubKey = getCurrentWalletPublicKey(session);
                 const launchInlineKeyboard = new InlineKeyboard()
                   .text(`✅ Chain - ${session.chain.value}`, "chainReView")
@@ -553,39 +618,60 @@ async function initiateOwnerMenu(submenu, menuData, stackedMenus) {
                   )
                   .row()
                   .text("Launch", "launch")
-                  .text("Cancel", "cancel-launch");
-                replyReviewLaunch(ctx, session, launchInlineKeyboard);
+                  .text("Cancel", "return")
+                  .row()
+                  .text('Return', 'return');
+                replyReviewLaunch(ctx, session, launchInlineKeyboard, true);
+                  }else {
+                    ctx.reply('⚠️ You must add the Contract of Your Token first!');
+                  }
               } else if ("variable" in item) {
                 const session = getSession(ctx.from.id);
                 session.isExpectingAnswer = "";
-                if ("type" in item && item.type === "toggle") {
-                  session[item.variable].value = !session[item.variable].value;
-                  ctx.menu.update();
-                } else {
-                  session.isExpectingAnswer = item.variable;
-                  if (session.isExpectingAnswer === "importedWallet") {
-                    ctx.reply(
-                      "Please input your private key do not share it to the others"
-                    );
+
+                const resultValidation = await session.token_address.validation(session.token_address.value);
+                if (item.name === "import-wallet" || item.name === "token-address" || resultValidation === true) {
+                  if ("type" in item && item.type === "toggle") {
+                    session[item.variable].value = !session[item.variable].value;
+                    ctx.menu.update();
                   } else {
-                    if (
-                      item.variable === "startTime" ||
-                      item.variable === "endTime"
-                    ) {
+                    session.isExpectingAnswer = item.variable;
+                    if (session.isExpectingAnswer === "importedWallet") {
                       ctx.reply(
-                        `Current timestamp is ${Date.now() / 1000
-                        }\nPlease input in this format : YYYY-MM-DD HH:MM:SS`
+                        "Please input your private key do not share it to the others",
+                        { reply_markup: cancelInlineKeyboard }
                       );
+                    } else {
+                      if (
+                        item.variable === "startTime" ||
+                        item.variable === "endTime"
+                      ) {
+                        ctx.reply(
+                          `Timestamp Now is ${Date.now() / 1000
+                          }\nCurrent Value is ${session[item.variable].value === undefined ||
+                            session[item.variable].value === ""
+                            ? "<b>Not Set</b>"
+                            : formatDate(session[item.variable].value)
+                          }\nPlease input in this format : YYYY-MM-DD HH:MM:SS`, { reply_markup: cancelInlineKeyboard, parse_mode: "HTML" }
+                        );
+                      } else {
+                        if (session.wallets.length !== 0) {
+                          ctx.reply(
+                            `Please input ${item.text} - Current value is ${session[item.variable].value === undefined ||
+                              session[item.variable].value === ""
+                              ? "<b>Not Set</b>"
+                              : session[item.variable].value
+                            }`,
+                            { reply_markup: cancelInlineKeyboard, parse_mode: "HTML" }
+                          );
+                        } else {
+                          ctx.reply('⚠️ Please import or create wallet first!');
+                        }
+                      }
                     }
-                    ctx.reply(
-                      `Please input ${item.text} - Current value is ${session[item.variable].value === undefined ||
-                        session[item.variable].value === ""
-                        ? "<b>Not Set</b>"
-                        : session[item.variable].value
-                      }`,
-                      { reply_markup: cancelInlineKeyboard, parse_mode: "HTML" }
-                    );
                   }
+                } else {
+                  ctx.reply("⚠️ You must add the Contract of Your Token first!")
                 }
               } else {
                 if (item.name == "manage-wallet") {
@@ -603,16 +689,24 @@ async function initiateOwnerMenu(submenu, menuData, stackedMenus) {
                   } else {
                     let cnt = 1;
                     for (const wallet of session.wallets) {
-                      inlineKeyboard.inline_keyboard[0].push({
+                      const button = {
                         text:
                           (cnt === session.selectedWallet ? "✅ " : "") +
                           "Wallet " +
                           cnt +
                           ` (${getWalletPublicKeyFromindex(session, cnt)})`,
                         callback_data: (item.isUserPart ? "user" : "owner") + "wallet_" + cnt,
-                      });
+                      };
+                      if (cnt % 2 === 0) {
+                        inlineKeyboard.inline_keyboard[inlineKeyboard.inline_keyboard.length - 1].push(button);
+                      }
+                      // If cnt is even (like 2, 4, 6...), add a new row and push the button to the new row
+                      else {
+                        inlineKeyboard.inline_keyboard.push([button]);
+                      }
                       cnt++;
                     }
+                    inlineKeyboard.inline_keyboard.push([{ text: 'Return', callback_data: 'return' }]);
                     ctx.reply("Please select wallet to manage", {
                       reply_markup: inlineKeyboard,
                     });
@@ -650,6 +744,7 @@ async function initiateOwnerMenu(submenu, menuData, stackedMenus) {
                             });
                           }
                         }
+                        inlineKeyboard.inline_keyboard[0].push({ text: 'Return', callback_data: 'return' });
                         console.log(pools);
                         if (pools.length > 0) {
                           ctx.reply(
@@ -692,6 +787,7 @@ async function initiateOwnerMenu(submenu, menuData, stackedMenus) {
                             });
                           }
                         }
+                        inlineKeyboard.inline_keyboard[0].push({ text: 'Return', callback_data: 'return' });
                         if (pools.length > 0) {
                           ctx.reply(
                             "Please make changes to your finished presale",
@@ -733,6 +829,7 @@ async function initiateOwnerMenu(submenu, menuData, stackedMenus) {
                             });
                           }
                         }
+                        inlineKeyboard.inline_keyboard[0].push({ text: 'Return', callback_data: 'return' });
                         if (pools.length > 0) {
                           ctx.reply("Please make changes to claim settings", {
                             reply_markup: inlineKeyboard,
@@ -773,6 +870,7 @@ async function initiateOwnerMenu(submenu, menuData, stackedMenus) {
                             });
                           }
                         }
+                        inlineKeyboard.inline_keyboard[0].push({ text: "Return", callback_data: 'return' });
                         if (pools.length > 0) {
                           ctx.reply(
                             "Please make changes to your finished presale",
@@ -816,6 +914,7 @@ async function initiateOwnerMenu(submenu, menuData, stackedMenus) {
                             });
                           }
                         }
+                        inlineKeyboard.inline_keyboard[0].push({ text: 'Return', callback_data: 'return' });
                         if (pools.length > 0) {
                           ctx.reply("Please finalize your finished presale", {
                             reply_markup: inlineKeyboard,
@@ -863,6 +962,7 @@ async function initiateOwnerMenu(submenu, menuData, stackedMenus) {
                           });
                         }
                       }
+                      inlineKeyboard.inline_keyboard[0].push({ text: 'Return', callback_data: 'return' })
                       console.log(pools);
                       if (pools.length > 0) {
                         ctx.reply("All live presales : ", {
@@ -896,6 +996,7 @@ async function initiateOwnerMenu(submenu, menuData, stackedMenus) {
                           });
                         }
                       }
+                      inlineKeyboard.inline_keyboard[0].push({ text: 'Return', callback_data: 'return' });
                       console.log(pools);
                       if (pools.length > 0) {
                         ctx.reply("All upcoming presales : ", {
@@ -920,7 +1021,7 @@ async function initiateOwnerMenu(submenu, menuData, stackedMenus) {
                     // Get the address (hex string)
                     const address = wallet.getAddressString();
 
-                    const inlineKeyboardCreateWallet = new InlineKeyboard().text(`Deposit`, `deposit_${address}`).text(`Balance`, `balance_${address}`);
+                    const inlineKeyboardCreateWallet = new InlineKeyboard().text(`Deposit`, `deposit_${address}`).text(`Balance`, `balance_${address}`).row().text('Return', 'return');
 
                     console.log(`Private Key: ${privateKey}`);
                     console.log(`Public Key: ${publicKey}`);
@@ -971,6 +1072,7 @@ async function initiateOwnerMenu(submenu, menuData, stackedMenus) {
                     ctx.reply('⚠️ Failed creation')
                   }
                 } else if (item.name === "contributions") {
+                  const session = getSession(ctx.from.id);
                   contributionAction(ctx, session);
                 } else {
                   ctx.reply(`Main Menu`, { reply_markup: main });
@@ -1000,12 +1102,6 @@ async function initiateOwnerMenu(submenu, menuData, stackedMenus) {
     );
   }
 }
-
-// Your Ethereum node's RPC URL (could be local, Infura, Alchemy, etc.)
-const providerURL = {
-  Binance: "https://bsc-testnet.public.blastapi.io",
-  Ethereum: "https://goerli.infura.io/v3/81f1f856e5854cda96f939fe2a658c40",
-};
 
 async function waitForTransactionReceipt(txHash, session) {
   return new Promise((resolve, reject) => {
@@ -1078,7 +1174,7 @@ async function launchPool(privateKey, session, username) {
             tokenAddress: session.token_address.value,
             sellAmount: session.sellAmount.value,
             acceptedTokens:
-              session.accepted_currency.value === "ETH"
+              session.accepted_currency.value === "ETH" || session.accepted_currency.value === "BNB"
                 ? 0
                 : session.accepted_currency.value === "USDT"
                   ? 1
@@ -1268,6 +1364,17 @@ async function mainFunc() {
           if (isValidDate(answer) === true) {
             const date = new Date(answer);
             answer = Math.floor(date.getTime() / 1000);
+            session[session.isExpectingAnswer].value = answer;
+            const reviewKeyboard = new InlineKeyboard()
+              .text(`✅ Chain - ${session.chain.value}`, "chainReView")
+              .text(
+                `${walletPubKey === ""
+                  ? "🚫 Please import wallet"
+                  : "✅ " + walletPubKey
+                }`,
+                "walletReView"
+              ).row().text('return', 'return');
+            replyReviewLaunch(ctx, session, reviewKeyboard, false);
           } else {
             ctx.reply("⚠️ please input valid date again YYYY-MM-DD HH:MM:SS");
             return;
@@ -1317,6 +1424,7 @@ async function mainFunc() {
                       text: "Emergency Withdraw",
                       callback_data: `EW_${pool.poolAddress}`
                     })
+                    inlineKeyboards.inline_keyboard[0].push({ text: 'Return', callback_data: 'return' });
                     ctx.reply(returnText, { reply_markup: inlineKeyboards });
                   }
                 }
@@ -1372,6 +1480,7 @@ async function mainFunc() {
                       text: "Emergency Withdraw",
                       callback_data: `EW_${pool.poolAddress}`
                     })
+                    inlineKeyboards.inline_keyboard[0].push({ text: 'Return', callback_data: 'return' });
                     ctx.reply(returnText, { reply_markup: inlineKeyboards });
                   }
                 }
@@ -1383,18 +1492,23 @@ async function mainFunc() {
             ctx.reply("⚠️ Please input valid address again");
           }
         } else if (session.isExpectingAnswer === "token_address") {
-          if (isValidEthereumAddress(answer) == true) {
-            const web3 = new Web3(providerURL[session.chain.value]);
+          const resultValidation = await session.token_address.validation(answer);
+          if (resultValidation == true) {
+            const provider = new HttpProvider(providerURL[session.chain.value]);
+            const web3 = new Web3(provider);
             const tokenAddress = answer;
+            console.log("answer", tokenAddress);
             const tokenContract = new web3.eth.Contract(tokenAbi, tokenAddress);
             try {
               const name = await tokenContract.methods.name().call();
+              console.log("name", name);
               const symbol = await tokenContract.methods.symbol().call();
+              console.log("symbol", symbol);
 
               session.token_name.value = name;
               session.token_symbol.value = symbol;
 
-              session[session.isExpectingAnswer] = answer;
+              session[session.isExpectingAnswer].value = answer;
               session.isExpectingAnswer = "";
               // ctx.reply(`Token Name : ${name}\nToken Symbol : ${symbol}`, {
               //   reply_markup: main,
@@ -1407,16 +1521,16 @@ async function mainFunc() {
                     : "✅ " + walletPubKey
                   }`,
                   "walletReView"
-                );
-              replyReviewLaunch(ctx, session, reviewKeyboard);
+                ).row().text('Return', 'return');
+              replyReviewLaunch(ctx, session, reviewKeyboard, false);
             } catch (err) {
               console.log(err);
               ctx.reply(
-                "⚠️ Can't load token info on bsc testnet, please input again"
+                `⚠️ Can't load token info on ${session.chain.value} testnet, please input again`
               );
             }
           } else {
-            ctx.reply("⚠️ please input valid address again");
+            ctx.reply(session.token_address.invalid_description);
           }
         } else if (session.isExpectingAnswer.startsWith("amountToContribute")) {
           const parts = session.isExpectingAnswer.split("amountToContribute");
@@ -1429,7 +1543,8 @@ async function mainFunc() {
             ctx.reply('please input correct amount');
           }
         } else {
-          if (session[session.isExpectingAnswer].validation(answer)) {
+          if (await session[session.isExpectingAnswer].validation(answer)) {
+            console.log("total selling amount", answer);
             session[session.isExpectingAnswer].value = answer;
             if (session.isExpectingAnswer === "importedWallet") {
               if (!session.wallets.includes(answer)) {
@@ -1478,8 +1593,8 @@ async function mainFunc() {
                     : "✅ " + walletPubKey
                   }`,
                   "walletReView"
-                );
-              replyReviewLaunch(ctx, session, reviewKeyboard);
+                ).row().text('Return', 'return');
+              replyReviewLaunch(ctx, session, reviewKeyboard, false);
               // ctx.reply(`${session.isExpectingAnswer} is ${answer}`, {
               //   reply_markup: main,
               // });
@@ -1564,6 +1679,7 @@ async function mainFunc() {
             .text('Send', `send-menu_${session.selectedWallet - 1}`)
             .text('Show Private Key', `showPrivateKey_${session.selectedWallet}`)
             .row()
+            .text('Return', `return`)
 
           // ctx.answerCallbackQuery({ text: "Pressed Wallet " + parts[1] + "!" });
 
@@ -1572,7 +1688,9 @@ async function mainFunc() {
 
           const addressHex = getCurrentWalletPublicKey(session);
 
-          ctx.reply("Current User Wallet's Information : " + addressHex, { reply_markup: inlineKeyboardOwnerWallet });
+          const balanceResult = await getTotalBalance(addressHex);
+
+          ctx.reply(`Current Wallet's information : ${addressHex}\nEtheruem\n  ---- ETH: ${balanceResult.Ethereum.NATIVE}\n  ---- USDT: ${balanceResult.Ethereum.USDT}\n  ---- BalzeX: ${balanceResult.Ethereum.BLAZEX}\nBinance\n  ---- BNB: ${balanceResult.Binance.NATIVE}\n  ---- USDT: ${balanceResult.Binance.USDT}\n  ---- BLAZEX: ${balanceResult.Binance.BLAZEX}`, { reply_markup: inlineKeyboardOwnerWallet });
         }
       }
       else if (data.startsWith("userwallet_")) {
@@ -1594,6 +1712,8 @@ async function mainFunc() {
             .row()
             // TODO : Send should be similar to Deployer Bot
             .text('Send', `send-menu_${session.selectedWallet - 1}`)
+            .row()
+            .text('Return', 'return');
 
           ctx.reply("Current Owner Wallet's Information : " + addressHex, { reply_markup: inlineKeybardUserWallet });
         }
@@ -1621,7 +1741,8 @@ async function mainFunc() {
                   //TODO : finalizeAddLP_
                   .text('Finalize & Add LP', `finalizeAddLP_${pools[0].chain}_${poolAddress}`)
                   //TODO : cancelRefund_
-                  .text('Cancel & Refund', `refund_${pools[0].chain}_${poolAddress}`);
+                  .text('Cancel & Refund', `refund_${pools[0].chain}_${poolAddress}`)
+                  .row().text('Return', 'return');
 
                 const tokenInfomationResult = getPresaleInformation(poolAddress, poolAddress, session);
                 if (tokenInfomationResult.isFinalized === false) {
@@ -1645,6 +1766,8 @@ async function mainFunc() {
                   .row()
                   //TODO : finalizeAddLP_
                   .text('Finalize & Add LP', `finalizeAddLP_${poolAddress}`)
+                  .row()
+                  .text('Return', 'return')
 
                 const tokenInfomationResult = getPresaleInformation(poolAddress, poolAddress, session);
                 await showInformationAboutProjectOwner(pools[0], ctx, tokenInfomationResult, session, replyInlineKeyboard);
@@ -1680,7 +1803,7 @@ async function mainFunc() {
 
           const presaleContract = new web3.eth.Contract(fairlaunchAbi, poolAddress);
           try {
-            if (session.accepted_currency.value === "ETH") {
+            if (session.accepted_currency.value === "ETH" || session.accepted_currency.value === "BNB") {
               await presaleContract.methods.buyWithETH(ethUtil.zeroAddress).send({ from: sender, value: session.amountToContribute });
             } else {
               const tokenContract = new web3.eth.Contract(tokenAbi, session.token_address.value);
@@ -1722,12 +1845,13 @@ async function mainFunc() {
         const parts = data.split("EW_");
         if (parts.length > 1) {
           const poolAddress = parts[1];
-          const EWInlineKeyboard = new InlineKeyboard().text('I am fine with it! Emergency Withdraw!!!', `EW_PROCEED${poolAddress}`)
+          const EWInlineKeyboard = new InlineKeyboard().text('I am fine with it! Emergency Withdraw!!!', `EW_PROCEED${poolAddress}`).text('Return', 'return');
           ctx.reply('It will take 10% fee, please consider if you are fine with it!', { reply_markup: EWInlineKeyboard })
         }
       } else if (data.startsWith('EW_PROCEED')) {
         const parts = data.split('EW_PROCEED');
         if (parts.length > 1) {
+          const session = getSession(ctx.from.id)
           const poolAddress = parts[1];
 
           ctx.reply(`⚠️ Emergency Withdrawing\n`);
@@ -1757,7 +1881,7 @@ async function mainFunc() {
 
         const balanceResult = await getTotalBalance(walletAddress);
 
-        ctx.reply(`Etheruem\n  ---- ETH: ${balanceResult.Ethereum.NATIVE}\n  ---- USDT: ${balanceResult.Ethereum.USDT}\n  ---- BalzeX: ${balnceResult.Ethereum.BLAZEX}\nBinance\n  ---- BNB: ${balanceResult.Binance.NATIVE}\n  ---- USDT: ${balanceResult.Binance.USDT}\n  ---- BLAZEX: ${balanceResult.Binance.BLAZEX}`);
+        ctx.reply(`Etheruem\n  ---- ETH: ${balanceResult.Ethereum.NATIVE}\n  ---- USDT: ${balanceResult.Ethereum.USDT}\n  ---- BalzeX: ${balanceResult.Ethereum.BLAZEX}\nBinance\n  ---- BNB: ${balanceResult.Binance.NATIVE}\n  ---- USDT: ${balanceResult.Binance.USDT}\n  ---- BLAZEX: ${balanceResult.Binance.BLAZEX}`);
       } else if (data === 'my-presales') {
         ctx.reply('My-Presales', { reply_markup: ongoingPresaleMenu });
       } else if (data === 'start-fairlaunch') {
@@ -1775,12 +1899,15 @@ async function mainFunc() {
                 OwnerInfo.updateOne(info, { ownerWallets: session.wallets })
                   .then((res) => {
                     console.log(`Update Owner ${ctx.from.username}`, res);
+                    ctx.answerCallbackQuery('Removed successfully');
                   })
-                  .catch((err) =>
+                  .catch((err) => {
                     console.log(
                       `Fail Owner Update ${ctx.from.username}`,
                       err
-                    )
+                    );
+                    ctx.answerCallbackQuery('Failed remove');
+                  }
                   );
               } else {
                 const newOwner = new OwnerInfo({
@@ -1879,6 +2006,7 @@ async function mainFunc() {
                       "Emergency Withdraw",
                       `EW_${pool.poolAddress}`
                     )
+                    inlineKeyboardUserProject.text('Return', 'return');
                     ctx.reply(returnText, { reply_markup: inlineKeyboardUserProject });
                   } else {
                     `Overview of Token\n
@@ -1904,6 +2032,7 @@ async function mainFunc() {
                       "Claim",
                       `userClaim_${pool.poolAddress}`
                     )
+                    inlineKeyboardUserProject.text('Return', 'return');
                     ctx.reply(returnText, { reply_markup: inlineKeyboardUserProject });
                   }
                 }
@@ -1987,6 +2116,9 @@ async function mainFunc() {
         } else {
           ctx.reply(`⚠️ Failed refund!!!`)
         }
+      } else if (data === 'return') {
+        ctx.answerCallbackQuery({ text: 'Returning main menu' });
+        ctx.reply('Main Menu', { reply_markup: main });
       }
     })
   } catch (err) {

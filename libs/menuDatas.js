@@ -9,7 +9,7 @@ const ownerMenuData = [
         text: "⚙️ Token Setup",
         name: "token-setup",
         submenu: [
-          { text: "Token Address", variable: "token_address" },
+          { text: "Token Address", name : 'token-address', variable: "token_address" },
           {
             text: "💵 Payment Currency",
             name: "payment-currency",
