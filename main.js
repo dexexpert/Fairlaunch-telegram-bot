@@ -260,6 +260,8 @@ function getSession(userId) {
         value: undefined,
         category: "configuration",
         validation: (val) => {
+          console.log("starttime", val);
+          console.log("now time", Math.floor(Date.now() / 1000))
           if (val !== undefined && isNumber(val)) {
             return val > Math.floor(Date.now() / 1000);
           }
@@ -696,6 +698,16 @@ async function removeTextWhenBack(ctx, next) {
   const session = getSession(ctx.from.id);
   ctx.editMessageText("Owner Menu");
   await next();
+}
+
+function initiateSession(session) {
+  const keysOfSession = Object.keys(session);
+  for (const item of keysOfSession) {
+    if (session[item].hasOwnProperty('validation') && item !== "accepted_currency" && item !== "chain" && item !== "router" && item!== "refundType" && item !== "whitelist_enabled" && item !== "referralEnabled") {
+      console.log(item);
+      session[item].value = undefined;
+    }
+  }
 }
 
 async function initiateOwnerMenu(submenu, menuData, stackedMenus) {
@@ -1854,7 +1866,7 @@ async function mainFunc() {
               const decimals = await tokenContract.methods.decimals().call();
               console.log("decimals", decimals);
 
-              session.token_decimals = decimals;
+              session.token_decimals.value = decimals;
               const supply = await tokenContract.methods.totalSupply().call();
               session.token_supply.value = supply;
               console.log("supply", supply);
@@ -2048,6 +2060,7 @@ async function mainFunc() {
         const parts = data.split("ownerwallet_");
         if (parts.length > 1) {
           const session = getSession(ctx.from.id);
+
           const inlineKeyboardOwnerWallet = new InlineKeyboard()
             // TODO : should indicate same callback data as my presale menu
             .text('My presales', `my-presales`)
@@ -2065,8 +2078,44 @@ async function mainFunc() {
             .text('Return', `return`)
 
           // ctx.answerCallbackQuery({ text: "Pressed Wallet " + parts[1] + "!" });
+          if (session.selectedWallet !== parseInt(parts[1])) {
+            initiateSession(session);
 
-          session.selectedWallet = parseInt(parts[1]);
+            session.selectedWallet = parseInt(parts[1]);
+
+            let cnt = 1;
+            const inlineKeyboard = {
+              inline_keyboard: [
+                [
+                  // { text: "Button 1", callback_data: "data_1" },
+                  // { text: "Button 2", callback_data: "data_2" },
+                ],
+              ],
+            };
+            for (const wallet of session.wallets) {
+              console.log(wallet);
+              const button = {
+                text:
+                  (cnt === session.selectedWallet ? "✅ " : "") +
+                  "Wallet " +
+                  cnt +
+                  ` (${getWalletPublicKeyFromindex(session, cnt)})`,
+                callback_data: "ownerwallet_" + cnt,
+              };
+              if (cnt % 2 === 0) {
+                inlineKeyboard.inline_keyboard[inlineKeyboard.inline_keyboard.length - 1].push(button);
+              }
+              // If cnt is even (like 2, 4, 6...), add a new row and push the button to the new row
+              else {
+                inlineKeyboard.inline_keyboard.push([button]);
+              }
+              cnt++;
+            }
+            inlineKeyboard.inline_keyboard.push([{ text: 'Return', callback_data: 'return' }]);
+            const result = await ctx.editMessageReplyMarkup({
+              reply_markup: inlineKeyboard,
+            });
+          }
           // Replace 'yourPrivateKeyHex' with your actual private key in hexadecimal format.
 
           const addressHex = getCurrentWalletPublicKey(session);

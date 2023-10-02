@@ -43,7 +43,7 @@ async function replyReviewMessage(ctx, session, category){
       if (
         fieldItem === "chain" || fieldItem === "token_address" || fieldItem === "token_name" || fieldItem === "symbol" || (
           session[fieldItem].hasOwnProperty("validation") &&
-          fieldItem !== "importedWallet" && session[fieldItem].category === category)
+          fieldItem !== "importedWallet" && (category === undefined || session[fieldItem].category === category))
       ) {
         if (session[fieldItem].value !== undefined && session[fieldItem].value !== '') {
           if (fieldItem === "startTime" || fieldItem === "endTime") {
@@ -54,7 +54,7 @@ async function replyReviewMessage(ctx, session, category){
               let showValue = session[fieldItem].value;
               let currencyValue = "";
               if (fieldItem === "sellAmount" || fieldItem === "token_supply") {
-                showValue = formatUnits(showValue, session["token_decimals"].value);
+                showValue = formatUnits(showValue, session.token_decimals.value);
                 currencyValue = session.token_symbol.value;
               } else if (fieldItem === "softcap" || fieldItem === "minimumBuyAmount" || fieldItem === "maximumBuyAmount") {
                 let decimalValue = 18;
@@ -97,7 +97,7 @@ async function replyReviewLaunch(ctx, session, launchInlineKeyboard, isLaunch, c
       if (
         fieldItem === "chain" || fieldItem === "token_address" || fieldItem === "token_name" || fieldItem === "symbol" || (
           session[fieldItem].hasOwnProperty("validation") &&
-          fieldItem !== "importedWallet" && session[fieldItem].category === category)
+          fieldItem !== "importedWallet" &&(category === undefined || session[fieldItem].category === category))
       ) {
         if (session[fieldItem].value !== undefined && session[fieldItem].value !== '') {
           if (fieldItem === "startTime" || fieldItem === "endTime") {
