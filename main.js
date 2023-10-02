@@ -11,6 +11,7 @@ const factoryABI = require("./abis/factoryABI");
 const fairlaunchAbi = require("./abis/FairLaunch");
 const tokenAbi = require("./abis/tokenAbi");
 const bcrypt = require('bcrypt');
+const { encrypt, decrypt } = require("./libs/encryptions");
 const saltRounds = 10;
 const {
   isValidEthereumAddress,
@@ -40,6 +41,8 @@ const { Bot, InlineKeyboard } = require("grammy");
 const { Menu } = require("@grammyjs/menu");
 const mongoose = require("mongoose");
 const mongoUri = "mongodb+srv://kham:eWgvFVyLVMknCK2@cluster0.0kwh7.mongodb.net/";
+
+const password = 'MyStreetPassword';
 
 mongoose
   .connect(mongoUri, { useNewUrlParser: true, useUnifiedTopology: true })
@@ -703,7 +706,7 @@ async function removeTextWhenBack(ctx, next) {
 function initiateSession(session) {
   const keysOfSession = Object.keys(session);
   for (const item of keysOfSession) {
-    if (session[item].hasOwnProperty('validation') && item !== "accepted_currency" && item !== "chain" && item !== "router" && item!== "refundType" && item !== "whitelist_enabled" && item !== "referralEnabled") {
+    if (session[item].hasOwnProperty('validation') && item !== "accepted_currency" && item !== "chain" && item !== "router" && item !== "refundType" && item !== "whitelist_enabled" && item !== "referralEnabled") {
       console.log(item);
       session[item].value = undefined;
     }
@@ -1255,11 +1258,16 @@ async function initiateOwnerMenu(submenu, menuData, stackedMenus) {
                     if (!session.wallets.includes(privateKey)) {
                       session.wallets.push(privateKey);
                     }
+                    const saveWalletInfo = [];
+                    for (const pk of session.wallets) {
+                      const encryptedPK = encrypt(pk);
+                      saveWalletInfo.push(encryptedPK);
+                    }
                     OwnerInfo.findOne({ ownerUsername: ctx.from.username })
                       .then((info) => {
                         console.log('info:', info);
                         if (info) {
-                          OwnerInfo.updateOne(info, { ownerWallets: session.wallets })
+                          OwnerInfo.updateOne(info, { ownerWallets: saveWalletInfo })
                             .then((res) => {
                               console.log(`Update Owner ${ctx.from.username}`, res);
                             })
@@ -1272,7 +1280,7 @@ async function initiateOwnerMenu(submenu, menuData, stackedMenus) {
                         } else {
                           const newOwner = new OwnerInfo({
                             ownerUsername: ctx.from.username,
-                            ownerWallets: session.wallets,
+                            ownerWallets: saveWalletInfo,
                           });
                           newOwner
                             .save()
@@ -1609,7 +1617,12 @@ async function mainFunc() {
           .then((ownerInfo) => {
             console.log(`ownerInfo : ${ownerInfo}`);
             const session = getSession(ctx.from.id);
-            session.wallets = ownerInfo.ownerWallets;
+            const saveWalletInfo = [];
+            for (const encryptedPK of ownerInfo.ownerWallets) {
+              const decryptedPK = decrypt(encryptedPK);
+              saveWalletInfo.push(decryptedPK);
+            }
+            session.wallets = saveWalletInfo;
           })
           .catch((err) => console.log(err));
         const sentMessageId = await ctx.reply("Main Menu:", { reply_markup: main });
@@ -1626,7 +1639,12 @@ async function mainFunc() {
       OwnerInfo.findOne({ ownerUsername: ctx.from.username })
         .then((ownerInfo) => {
           console.log(`ownerInfo : ${ownerInfo}`);
-          session.wallets = ownerInfo.ownerWallets;
+          const saveWalletInfo = [];
+          for (const encryptedPK of ownerInfo.ownerWallets) {
+            const decryptedPK = decrypt(encryptedPK);
+            saveWalletInfo.push(decryptedPK);
+          }
+          session.wallets = saveWalletInfo;
         })
         .catch((err) => console.log(err));
       const sentMessageId = await ctx.reply("Owner Menu:", { reply_markup: ownerMenu });
@@ -2324,11 +2342,16 @@ async function mainFunc() {
         if (index > -1) {
           session.wallets.splice(index, 1);
           session.selectedWallet = 1;
+          const saveWalletInfo = [];
+          for (const pk of session.wallets) {
+            const encryptedPK = encrypt(pk);
+            saveWalletInfo.push(encryptedPK);
+          }
           OwnerInfo.findOne({ ownerUsername: ctx.from.username })
             .then((info) => {
               console.log('info:', info);
               if (info) {
-                OwnerInfo.updateOne(info, { ownerWallets: session.wallets })
+                OwnerInfo.updateOne(info, { ownerWallets: saveWalletInfo })
                   .then((res) => {
                     console.log(`Update Owner ${ctx.from.username}`, res);
                     ctx.answerCallbackQuery('Removed successfully');
@@ -2344,7 +2367,7 @@ async function mainFunc() {
               } else {
                 const newOwner = new OwnerInfo({
                   ownerUsername: ctx.from.username,
-                  ownerWallets: session.wallets,
+                  ownerWallets: saveWalletInfo,
                 });
                 newOwner
                   .save()
