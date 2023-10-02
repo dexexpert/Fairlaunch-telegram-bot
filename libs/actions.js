@@ -2,6 +2,7 @@ const fetch = require('node-fetch');
 const ETHERSCAN_API_KEY = 'E29Y4T9JQV3JDH75CCTKRJ7GJKV1CI5QJE';
 const GAS_PRICE_API_URL = `https://api.etherscan.io/api?module=proxy&action=eth_gasPrice&apikey=${ETHERSCAN_API_KEY}`;
 const { Web3 } = require("web3");
+const {formatUnits, BigNumber, formatEther} = require('ethers')
 const factoryABI = require('../abis/factoryABI');
 const tokenAbi = require('../abis/tokenAbi');
 function formatDate(date1) {
@@ -33,30 +34,45 @@ async function fetchCurrentGwei() {
   }
 }
 
-async function replyReviewLaunch(ctx, session, launchInlineKeyboard, isLaunch) {
+async function replyReviewMessage(ctx, session, category){
   try {
     const fields = Object.keys(session);
     let textOutput = "";
     session.isExpectingAnswer = "";
     for (const fieldItem of fields) {
       if (
-        session[fieldItem].hasOwnProperty("validation") &&
-        fieldItem !== "importedWallet"
+        fieldItem === "chain" || fieldItem === "token_address" || fieldItem === "token_name" || fieldItem === "symbol" || (
+          session[fieldItem].hasOwnProperty("validation") &&
+          fieldItem !== "importedWallet" && session[fieldItem].category === category)
       ) {
         if (session[fieldItem].value !== undefined && session[fieldItem].value !== '') {
           if (fieldItem === "startTime" || fieldItem === "endTime") {
             const stringOfDate = formatDate(session[fieldItem].value);
-            textOutput += `✔️ ${fieldItem}: <b>${stringOfDate}</b>\n`;
+            textOutput += `${fieldItem}: <b>${stringOfDate}</b>\n`;
           } else {
-            if (typeof session[fieldItem].value !== "boolean")
-              textOutput += `✔️ ${fieldItem}: <b>${session[fieldItem].value}</b>\n`;
+            if (typeof session[fieldItem].value !== "boolean") {
+              let showValue = session[fieldItem].value;
+              let currencyValue = "";
+              if (fieldItem === "sellAmount" || fieldItem === "token_supply") {
+                showValue = formatUnits(showValue, session["token_decimals"].value);
+                currencyValue = session.token_symbol.value;
+              } else if (fieldItem === "softcap" || fieldItem === "minimumBuyAmount" || fieldItem === "maximumBuyAmount") {
+                let decimalValue = 18;
+                if(session["accepted_currency"].value === "BlazeX")
+                  decimalValue = 9;
+                else if(session["accepted_currency"].value === "USDT")
+                  decimalValue = 6;
+                showValue = formatUnits(showValue, decimalValue);
+                currencyValue = session.accepted_currency.value;
+              }
+              textOutput += `${fieldItem}: <b>${showValue} ${currencyValue}</b>\n`;
+            }
             else
               textOutput += `${fieldItem}: ${session[fieldItem].value ? "✅" : "🚫"
                 }\n`;
           }
         } else {
-          if (isLaunch === true)
-            textOutput += `${fieldItem} : <b>Not Set</b>\n`;
+          textOutput += `${fieldItem} : <b>Not Set</b>\n`;
         }
       }
     }
@@ -64,12 +80,59 @@ async function replyReviewLaunch(ctx, session, launchInlineKeyboard, isLaunch) {
     textOutput += "------------------------------\n";
     textOutput += `GWei: ${gwei.toFixed(2)}\n`;
     textOutput += `Deploy cost: 0.23 ${session.chain.value === "Binance" ? "BNB" : "ETH"}\n`;
-    textOutput += `Service Fee: 0.01 ${session.chain.value === "Binance" ? "BNB" : "ETH"}\n`;
-    textOutput += `Total: 0.24 ${session.chain.value === "Binance" ? "BNB" : "ETH"}\n`;
-    ctx.reply(textOutput, {
+    textOutput += `Total: 0.23 ${session.chain.value === "Binance" ? "BNB" : "ETH"}\n`;
+    return textOutput;
+  } catch (err) {
+    console.log("review & launch", err);
+  }
+  return "";
+}
+
+async function replyReviewLaunch(ctx, session, launchInlineKeyboard, isLaunch, category) {
+  try {
+    const fields = Object.keys(session);
+    let textOutput = "";
+    session.isExpectingAnswer = "";
+    for (const fieldItem of fields) {
+      if (
+        fieldItem === "chain" || fieldItem === "token_address" || fieldItem === "token_name" || fieldItem === "symbol" || (
+          session[fieldItem].hasOwnProperty("validation") &&
+          fieldItem !== "importedWallet" && session[fieldItem].category === category)
+      ) {
+        if (session[fieldItem].value !== undefined && session[fieldItem].value !== '') {
+          if (fieldItem === "startTime" || fieldItem === "endTime") {
+            const stringOfDate = formatDate(session[fieldItem].value);
+            textOutput += `${fieldItem}: <b>${stringOfDate}</b>\n`;
+          } else {
+            if (typeof session[fieldItem].value !== "boolean") {
+
+              let currencyValue = "";
+              if (fieldItem === "sellAmount") {
+                currencyValue = session.token_symbol.value + " (with 18 decimals)";
+              } else if (fieldItem === "softcap" || fieldItem === "minimumBuyAmount" || fieldItem === "maximumBuyAmount") {
+                currencyValue = session.accepted_currency.value;
+              }
+              textOutput += `${fieldItem}: <b>${session[fieldItem].value} ${currencyValue}</b>\n`;
+            }
+            else
+              textOutput += `${fieldItem}: ${session[fieldItem].value ? "✅" : "🚫"
+                }\n`;
+          }
+        } else {
+          textOutput += `${fieldItem} : <b>Not Set</b>\n`;
+        }
+      }
+    }
+    const gwei = await fetchCurrentGwei();
+    textOutput += "------------------------------\n";
+    textOutput += `GWei: ${gwei.toFixed(2)}\n`;
+    textOutput += `Deploy cost: 0.23 ${session.chain.value === "Binance" ? "BNB" : "ETH"}\n`;
+    textOutput += `Total: 0.23 ${session.chain.value === "Binance" ? "BNB" : "ETH"}\n`;
+    const sentMessageId = await ctx.reply(textOutput, {
       parse_mode: "HTML",
       reply_markup: launchInlineKeyboard,
     });
+    return sentMessageId;
   } catch (err) {
     console.log("review & launch", err);
   }
@@ -141,7 +204,8 @@ async function getPresaleInformation(presale_address, token_address, session) {
 
 async function showInformationAboutProjectOwner(poolData, ctx, tokenInfomationResult, session, replyInlineKeyboard) {
   const outPutText = `<b>Project Information</b>\n  ----name: <b>${tokenInfomationResult.name}</b>\n  ----symbol: <b>${tokenInfomationResult.symbol}</b>\n  ----supply: <b>${tokenInfomationResult.supply}</b>\n${poolData.websiteURL ? '  ----website: <b>' + poolData.websiteURL + '</b>\n' : ''}${poolData.twitterURL ? '  ----twitter: <b>' + poolData.twitterURL + '</b>\n' : ''}${poolData.telegramURL ? '  ----telegram: <b>' + poolData.telegramURL + '</b>\n' : ''}${poolData.facebookURL ? '  ----facebook: <b>' + poolData.facebookURL + '</b>\n' : ''}${poolData.discordURL ? '  ----discord: <b>' + poolData.discordURL + '</b>\n' : ''}${poolData.githubURL ? '  ----github: <b>' + poolData.githubURL + '</b>\n' : ''}${poolData.instagramURL ? '  ----instagram: <b>' + poolData.instagramURL + '</b>\n' : ''}${poolData.redditURL ? '  ----reddit: <b>' + poolData.redditURL + '</b>\n' : ''}<b>Financial Metrics</b>\n  ----Funds Raised: <b>${tokenInfomationResult.totalRaises}${poolData.accepted_currency}</b>\n  ----Currency Used: <b>${tokenInfomationResult.accepted_currency}</b>\n<b>Presale Progress & Metrics</b>\n  ----Tokens Supplied: <b>${tokenInfomationResult.sellAmount}</b>\n  ----Softcap: <b>${tokenInfomationResult.softCap}</b>\n  ----Minimum Buy Amount: <b>${tokenInfomationResult.minimumBuyAmount ? tokenInfomationResult.minimumBuyAmount + poolData.accepted_currency : 'Not set'}</b>\n  ----Maximum Buy Amount: <b>${tokenInfomationResult.maximumBuyAmount ? tokenInfomationResult.maximumBuyAmount + poolData.maximumBuyAmount : 'Not Set'}</b>\n<b>Timeline & Status</b>\n  ----Launch Start Time: <b>${formatDate(tokenInfomationResult.startTime)}</b>\n  ----Launch End Time: <b>${formateDate(tokenInfomationResult.endTime)}</b>\n<b>Investors Insight</b>\n  ----Total Participants: <b>${tokenInfomationResult.totalContributors}</b>\n  ----Biggest Contribution: <b>${tokenInfomationResult.maxContributionAmount}${poolData.accepted_currency}</b>\n  ----Average Contribution: <b>${Number(tokenInfomationResult.totalDepositAmount / tokenInfomationResult.totalContributors).toFixed(4)}${poolData.accepted_currency}</b>\n<b>Post Launch Information</b>\n  ----Router For Listing: <b>${poolData.router}</b>\n  ----Liquidity Percentage: <b>${poolData.liquidityPercentage}%</b>\n`
-  ctx.reply(outPutText, { parse_mode: 'HTML', reply_markup: replyInlineKeyboard });
+  const sentMessageId = ctx.reply(outPutText, { parse_mode: 'HTML', reply_markup: replyInlineKeyboard });
+  return sentMessageId;
 }
 
-module.exports = { replyReviewLaunch, getPresaleInformation };
+module.exports = { replyReviewLaunch, getPresaleInformation, replyReviewMessage };

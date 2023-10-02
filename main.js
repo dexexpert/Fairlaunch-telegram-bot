@@ -4,9 +4,14 @@ const ethUtil = require("ethereumjs-util");
 const Wallet = require('ethereumjs-wallet');
 const EC = require("elliptic").ec;
 const ec = new EC("secp256k1");
+const TelegramBot = require("node-telegram-bot-api");
+const { parseUnits, BigNumber } = require('ethers')
+const { ethers } = require('ethers');
 const factoryABI = require("./abis/factoryABI");
 const fairlaunchAbi = require("./abis/FairLaunch");
 const tokenAbi = require("./abis/tokenAbi");
+const bcrypt = require('bcrypt');
+const saltRounds = 10;
 const {
   isValidEthereumAddress,
   isNumber,
@@ -14,8 +19,8 @@ const {
   isValidPrivateKey,
   isValidDate,
 } = require("./libs/validators");
-const { ownerMenuData, userMenuData } = require("./libs/menuDatas");
-const { replyReviewLaunch, getPresaleInformation } = require("./libs/actions");
+const { menuData } = require("./libs/menuDatas");
+const { replyReviewLaunch, getPresaleInformation, replyReviewMessage } = require("./libs/actions");
 const getTotalBalance = require("./libs/walletFuncs");
 const HDWalletProvider = require("@truffle/hdwallet-provider");
 // ERC-20 Token ABI with only the necessary parts for fetching name and symbol
@@ -94,6 +99,11 @@ const ownerInfoSchema = new Schema({
   ownerWallets: [String],
 });
 
+const userStuckedMessageSchema = new Schema({
+  ownerUsername: String,
+  stuckedMessageIds: [String],
+});
+
 const PoolInfo = mongoose.model("PoolInfo", poolInfoSchema);
 const OwnerInfo = mongoose.model("OwnerInfo", ownerInfoSchema);
 const ContributionInfo = mongoose.model("ContributionInfo", contributionDataSchema);
@@ -118,12 +128,16 @@ function formatDate(date1) {
 function getSession(userId) {
   if (!sessions[userId]) {
     sessions[userId] = {
+      today_messages: [],
+      stucked_messages: [],
       token_address: {
         value: undefined,
+        category: "setup",
         invalid_description: "Please input valid token address",
       },
       token_name: {
         value: undefined,
+        category: "setup",
         validation: (val) => {
           return val !== undefined;
         },
@@ -131,13 +145,29 @@ function getSession(userId) {
       },
       token_symbol: {
         value: undefined,
+        category: "setup",
         validation: (val) => {
           return val !== undefined;
         },
         invalid_description: "Please input valid token symbol",
       },
+      token_supply: {
+        value: undefined,
+        category: "setup",
+        validation: (val) => {
+          return val !== undefined;
+        }
+      },
+      token_decimals: {
+        value: undefined,
+        category: "setup",
+        validation: (val) => {
+          return val !== undefined;
+        }
+      },
       accepted_currency: {
         value: "BNB",
+        category: "setup",
         validation: (val) => {
           return true;
         },
@@ -145,6 +175,7 @@ function getSession(userId) {
       }, // ETH USDT BLAZEX
       chain: {
         value: "Binance",
+        category: "setup",
         validation: (val) => {
           return true;
         },
@@ -152,6 +183,7 @@ function getSession(userId) {
       },
       sellAmount: {
         value: undefined,
+        category: "configuration",
         // validation: (val) => {
         //   return val !== undefined && isNumber(val) && val > 0;
         // },
@@ -159,6 +191,7 @@ function getSession(userId) {
       },
       softcap: {
         value: undefined,
+        category: "configuration",
         validation: (val) => {
           return val !== undefined && isNumber(val);
         },
@@ -166,6 +199,7 @@ function getSession(userId) {
       },
       minimumBuyAmount: {
         value: undefined,
+        category: "configuration",
         validation: (val) => {
           return val !== undefined && isNumber(val);
         },
@@ -173,19 +207,21 @@ function getSession(userId) {
       },
       maximumBuyAmount: {
         value: undefined,
-
+        category: "configuration",
         invalid_description:
           "Please input valid number (must be greater than minimum buy amount)",
       },
       whitelist_enabled: {
-        value: undefined,
+        value: false,
+        category: "setup",
         validation: (val) => {
           return val !== undefined;
         },
         invalid_description: "Please input true or false",
       },
       referralEnabled: {
-        value: undefined,
+        value: false,
+        category: "setup",
         validation: (val) => {
           return val !== undefined;
         },
@@ -193,6 +229,7 @@ function getSession(userId) {
       },
       router: {
         value: "Uniswap",
+        category: "configuration",
         validation: (val) => {
           return true;
         },
@@ -201,6 +238,7 @@ function getSession(userId) {
       }, // Uniswap Pancakeswap
       refundType: {
         value: "Burn",
+        category: "configuration",
         validation: (val) => {
           return true;
         },
@@ -208,6 +246,7 @@ function getSession(userId) {
       },
       liquidityPercentage: {
         value: undefined,
+        category: "configuration",
         validation: (val) => {
           if (val !== undefined && isNumber(val)) {
             return val >= 51;
@@ -219,6 +258,7 @@ function getSession(userId) {
       },
       startTime: {
         value: undefined,
+        category: "configuration",
         validation: (val) => {
           if (val !== undefined && isNumber(val)) {
             return val > Math.floor(Date.now() / 1000);
@@ -230,6 +270,7 @@ function getSession(userId) {
       },
       endTime: {
         value: undefined,
+        category: "configuration",
         invalid_description:
           "Please input valid number (timestamp must be after now and before 7 days from start time)",
       },
@@ -241,6 +282,7 @@ function getSession(userId) {
           }
           return false;
         },
+        category: "configuration",
         invalid_description:
           "Please input valid number (must be bigger than 60 days)",
       },
@@ -249,31 +291,31 @@ function getSession(userId) {
         validation: (val) => {
           return val !== undefined && isValidURL(val) && val.length > 0;
         },
-        isURL: true,
+        category: "information",
         invalid_description: "You need use https://",
       },
       websiteURL: {
         value: "",
         validation: (val) => {
-          return val !== undefined && isValidURL(val);
+          return val !== undefined && val !== "" && isValidURL(val);
         },
-        isURL: true,
+        category: "information",
         invalid_description: "You need use https://",
       },
       twitterURL: {
         value: "",
         validation: (val) => {
-          return val !== undefined && isValidURL(val);
+          return val !== undefined && val !== "" && isValidURL(val);
         },
-        isURL: true,
+        category: "information",
         invalid_description: "You need use https://",
       },
       telegramURL: {
         value: "",
         validation: (val) => {
-          return val !== undefined && isValidURL(val);
+          return val !== undefined && val !== "" && isValidURL(val);
         },
-        isURL: true,
+        category: "information",
         invalid_description: "You need use https://",
       },
       facebookURL: {
@@ -281,7 +323,7 @@ function getSession(userId) {
         validation: (val) => {
           return val !== undefined && isValidURL(val);
         },
-        isURL: true,
+        category: "information",
         invalid_description: "You need use https://",
       },
       discordURL: {
@@ -289,7 +331,7 @@ function getSession(userId) {
         validation: (val) => {
           return val !== undefined && isValidURL(val);
         },
-        isURL: true,
+        category: "information",
         invalid_description: "You need use https://",
       },
       githubURL: {
@@ -297,7 +339,7 @@ function getSession(userId) {
         validation: (val) => {
           return val !== undefined && isValidURL(val);
         },
-        isURL: true,
+        category: "information",
         invalid_description: "You need use https://",
       },
       instagramURL: {
@@ -305,7 +347,7 @@ function getSession(userId) {
         validation: (val) => {
           return val !== undefined && isValidURL(val);
         },
-        isURL: true,
+        category: "information",
         invalid_description: "You need use https://",
       },
       redditURL: {
@@ -313,7 +355,7 @@ function getSession(userId) {
         validation: (val) => {
           return val !== undefined && isValidURL(val);
         },
-        isURL: true,
+        category: "information",
         invalid_description: "You need use https://",
       },
       preview: {
@@ -321,6 +363,7 @@ function getSession(userId) {
         validation: (val) => {
           return val !== undefined && isValidURL(val);
         },
+        category: "information",
         invalid_description: "You need use https://",
       },
       description: {
@@ -328,6 +371,7 @@ function getSession(userId) {
         validation: (val) => {
           return true;
         },
+        category: "information",
         invalid_description: "Please input valid string",
       },
       importedWallet: {
@@ -341,6 +385,7 @@ function getSession(userId) {
       amountToContribute: 0,
       isExpectingAnswer: "",
       selectedWallet: 1,
+      isAuth: false,
     };
     sessions[userId].token_address.validation = async (val) => {
       if (val === undefined || isValidEthereumAddress(val) === false) {
@@ -348,6 +393,8 @@ function getSession(userId) {
         return false;
       }
       console.log("valid address");
+      if (sessions[userId].wallets.length === 0)
+        return false;
       const privateKey = sessions[userId].wallets[sessions[userId].selectedWallet - 1];
       // Setup provider with the private key
       const provider = new HDWalletProvider(
@@ -361,14 +408,19 @@ function getSession(userId) {
       const web3 = new Web3(provider);
 
       const sender = getCurrentWalletPublicKey(sessions[userId]);
-
-      const tokenContract = new web3.eth.Contract(
-        tokenAbi,
-        val
-      );
-      const result = await tokenContract.methods.balanceOf(sender).call({ from: sender });
-      if (result == 0 || result === '0n') {
-        sessions[userId].token_address.invalid_description = "⚠️ The contract exists, but you don't have any tokens in your wallet.";
+      try {
+        const tokenContract = new web3.eth.Contract(
+          tokenAbi,
+          val
+        );
+        const result = await tokenContract.methods.balanceOf(sender).call({ from: sender });
+        if (result == 0 || result === '0n') {
+          sessions[userId].token_address.invalid_description = "⚠️ The contract exists, but you don't have any tokens in your wallet.";
+          return false;
+        }
+      }
+      catch (err) {
+        console.log(err);
         return false;
       }
 
@@ -388,7 +440,11 @@ function getSession(userId) {
     sessions[userId].maximumBuyAmount.validation = (val) => {
       if (val === undefined) return true;
       if (isNumber(val)) {
-        return val === 0 || val > sessions[userId].minimumBuyAmount.value;
+        const minimumVal = sessions[userId].minimumBuyAmount.value === undefined ? '0' : sessions[userId].minimumBuyAmount.value;
+        console.log("minimum", minimumVal);
+        console.log("max", BigInt(val));
+        console.log("min", BigInt(minimumVal));
+        return val === 0 || BigInt(val) > BigInt(minimumVal);
       }
       return false;
     };
@@ -439,6 +495,26 @@ function getSession(userId) {
   return sessions[userId];
 }
 
+
+function checkPassword(pwd, ctxId) {
+}
+
+function encryptAndSavePWD(userPWD, ctxId) {
+  bcrypt.hash(userPassword, saltRounds, function (err, hash) {
+    if (err) throw err;
+
+    // Save the hash in MongoDB
+    // ... your MongoDB saving code here ...
+
+  });
+}
+// 0x137bf66ebb4e4796491e7a0ed4ea8334b54f5bbe
+function encryptPK(pk) {
+}
+
+function decryptPK(password, enc_pk) {
+}
+
 function getCurrentWalletPublicKey(session) {
   if (session.wallets.length === 0) return "";
   const privateKeyHex = session.wallets[session.selectedWallet - 1].slice(2);
@@ -475,21 +551,22 @@ function getWalletPublicKeyFromindex(session, index) {
   return addressHex;
 }
 
-function contributionAction(ctx, session) {
+async function contributionAction(ctx, session) {
+  let sentMessageId = undefined;
   if (session.wallets.length === 0) {
-    ctx.reply(
+    sentMessageId = await ctx.reply(
       "⛔️ No wallets selected and can't load your presale info"
     );
   } else {
     ContributionInfo.find({ userWallet: getCurrentWalletPublicKey(session) })
-      .then(contributions => {
+      .then(async contributions => {
         if (contributions.length > 0) {
           const projectsInlineKeyboard = new InlineKeyboard();
           for (const contributionItem of contributions) {
             PoolInfo.findOne({ poolAddress: contributionItem.poolAddress, chain: session.chain.value })
               .then(async (pools) => {
                 if (pools === null) {
-                  ctx.reply(`⚠️ No result! for ${contributionItem.poolAddress}`);
+                  sentMessageId = await ctx.reply(`⚠️ No result! for ${contributionItem.poolAddress}`);
                 } else {
                   const privateKey = session.wallets[session.selectedWallet - 1];
                   // Setup provider with the private key
@@ -511,39 +588,154 @@ function contributionAction(ctx, session) {
                 console.log(err);
               });
           }
-          ctx.reply(`Your contributed pools are her`, { reply_markup: projectsInlineKeyboard });
+          sentMessageId = await ctx.reply(`Your contributed pools are her`, { reply_markup: projectsInlineKeyboard });
         } else {
-          ctx.reply('⚠️ You have no contributed presales');
+          sentMessageId = await ctx.reply('⚠️ You have no contributed presales');
         }
       })
-      .catch(err => { console.log(err); ctx.reply(`⚠️ Failed fetching contributions`) })
+      .catch(async err => { console.log(err); sentMessageId = await ctx.reply(`⚠️ Failed fetching contributions`) })
   }
+  if (sentMessageId !== undefined)
+    session.today_messages.push(sentMessageId.message_id);
 }
 
-const main = new Menu("root-menu")
-  .submenu("Owner Menu", "owner-menu")
-  .submenu("User Menu", "user-menu");
+const main = new Menu("root-menu");
 
 let ongoingPresaleMenu;
+let tokenSetupMenu;
+let presaleConfigurationMenu;
+let presaleInformationMenu;
+let currentMenuStatus;
+let ownerMenu;
+let userMenu;
 
 const cancelInlineKeyboard = new InlineKeyboard().text(
   "cancel",
   "click-cancel-input"
 );
+
+async function ownerMenuMiddleware(ctx, next) {
+  try {
+    const session = getSession(ctx.from.id);
+    await ctx.api.editMessageText(ctx.chat.id, session.today_messages[0], "Owner Menu", { parse_mode: 'HTML' })
+  } catch (err) { console.log(err) };
+
+  await next();
+}
+
+async function userMenuMiddleware(ctx, next) {
+  try {
+    const session = getSession(ctx.from.id);
+    await ctx.api.editMessageText(ctx.chat.id, session.today_messages[0], "User menu", { parse_mode: 'HTML' })
+  } catch (err) { console.log(err) };
+  await next();
+}
+
+async function tokenSetupMiddleware(ctx, next) {
+  try {
+    const session = getSession(ctx.from.id);
+    const showText = await replyReviewMessage(ctx, session, 'setup');
+    await ctx.api.editMessageText(ctx.chat.id, session.today_messages[0], showText, { parse_mode: 'HTML' })
+  } catch (err) { console.log(err) }
+  await next();
+}
+
+async function configurationMiddleware(ctx, next) {
+  const session = getSession(ctx.from.id);
+  if (await session.token_address.validation(session.token_address.value) === true) {
+    try {
+      const showText = await replyReviewMessage(ctx, session, 'configuration');
+      await ctx.api.editMessageText(ctx.chat.id, session.today_messages[0], showText, { parse_mode: 'HTML' })
+    } catch (err) { console.log(err) }
+
+    await next();
+  } else {
+    const sentMessageId = await ctx.reply("⚠️ You must add the Contract of Your Token first!");
+    session.today_messages.push(sentMessageId.message_id);
+  }
+}
+
+async function informationMiddleware(ctx, next) {
+  const session = getSession(ctx.from.id);
+  if (await session.token_address.validation(session.token_address.value) === true) {
+    try {
+      const showText = await replyReviewMessage(ctx, session, 'information');
+      await ctx.api.editMessageText(ctx.chat.id, session.today_messages[0], showText, { parse_mode: 'HTML' })
+    } catch (err) { console.log(err) }
+    await next();
+  } else {
+    const sentMessageId = await ctx.reply("⚠️ You must add the Contract of Your Token first!");
+    session.today_messages.push(sentMessageId.message_id);
+  }
+}
+
+async function isTokenAddressValidated(ctx, next) {
+  const session = getSession(ctx.from.id);
+  if (await session.token_address.validation(session.token_address.value) === true) {
+    await next();
+  } else {
+    const sentMessageId = await ctx.reply("⚠️ You must add the Contract of Your Token first!");
+    session.today_messages.push(sentMessageId.message_id);
+  }
+}
+
+async function backMiddleware(ctx, next) {
+  const session = getSession(ctx.from.id);
+  await removeAllMessages(ctx, 0);
+  await ctx.editMessageText("Owner Menu");
+  await next();
+}
+async function backMiddlewareOwnerMenu(ctx, next) {
+  const session = getSession(ctx.from.id);
+  await removeAllMessages(ctx, 0);
+  await ctx.editMessageText("Main Menu");
+  await next();
+}
+
+async function removeTextWhenBack(ctx, next) {
+  const session = getSession(ctx.from.id);
+  ctx.editMessageText("Owner Menu");
+  await next();
+}
+
 async function initiateOwnerMenu(submenu, menuData, stackedMenus) {
   if (Array.isArray(menuData)) {
     for (const item of menuData) {
       if ("submenu" in item) {
         const menu1 = new Menu(item.name);
-        
+
         await initiateOwnerMenu(menu1, item.submenu, []);
-        submenu.submenu(item.text, item.name);
+
+        if (item.name === 'my-presales') {
+          ongoingPresaleMenu = menu1;
+        }
+        else if (item.name === 'token-setup') {
+          tokenSetupMenu = menu1;
+        } else if (item.name === 'presale-configuration') {
+          presaleConfigurationMenu = menu1;
+        } else if (item.name === 'presale-information') {
+          presaleInformationMenu = menu1;
+        } else if (item.name === 'owner-menu') {
+          ownerMenu = menu1;
+        } else if (item.name === 'user-menu') {
+          userMenu = menu1;
+        }
+        if (item.name === "presale-configuration") {
+          submenu.text(item.text, configurationMiddleware, (ctx, next) => (ctx.menu.nav(item.name), next()));
+        } else if (item.name === "presale-information") {
+          submenu.text(item.text, informationMiddleware, (ctx, next) => (ctx.menu.nav(item.name), next()));
+        } else if (item.name === "token-setup") {
+          submenu.text(item.text, tokenSetupMiddleware, (ctx, next) => (ctx.menu.nav(item.name), next()));
+        } else if (item.name === 'owner-menu') {
+          submenu.text(item.text, ownerMenuMiddleware, (ctx, next) => (ctx.menu.nav(item.name), next()));
+        } else if (item.name === 'user-menu') {
+          submenu.text(item.text, userMenuMiddleware, (ctx, next) => (ctx.menu.nav(item.name), next()));
+        } else {
+          submenu.submenu(item.text, item.name);
+        }
         stackedMenus.push(menu1);
         if ("isRow" in item) {
           submenu.row();
-        }
-        if (item.name === 'my-presales') {
-          ongoingPresaleMenu = menu1;
         }
         // main.register(menu1);
       } else {
@@ -572,12 +764,13 @@ async function initiateOwnerMenu(submenu, menuData, stackedMenus) {
                 }
                 return selectOption;
               },
-              (ctx) => {
+              async (ctx) => {
                 const session = getSession(ctx.from.id);
                 session.isExpectingAnswer = "";
                 if (session[item.variable].value !== selectOption) {
                   session[item.variable].value = selectOption;
-                  ctx.menu.update();
+                  const showText = await replyReviewMessage(ctx, session, session[item.variable].category);
+                  ctx.editMessageText(showText, { parse_mode: 'HTML' });
                 }
               }
             );
@@ -588,7 +781,7 @@ async function initiateOwnerMenu(submenu, menuData, stackedMenus) {
           // main.register(choiceMenu);
         } else {
           submenu.text(
-            (ctx) => {
+            async (ctx) => {
               if (ctx.from && "type" in item) {
                 if (item.type === "toggle") {
                   const session = getSession(ctx.from.id);
@@ -599,13 +792,19 @@ async function initiateOwnerMenu(submenu, menuData, stackedMenus) {
                   }
                 }
               }
+              else if (ctx.from && "variable" in item) {
+                const session = getSession(ctx.from.id);
+                if (session[item.variable]?.hasOwnProperty("validation")) {
+                  // console.log(item.variable);
+                  return ((session[item.variable].value !== undefined && session[item.variable].value !== '') ? "✅" : '') + item.text;
+                }
+              }
               return item.text;
             },
             async (ctx) => {
+              let sentMessageId = undefined;
               if ("type" in item && item.type === "launch") {
                 const session = getSession(ctx.from.id);
-
-                if(await session.token_address.validation(session.token_address.value) === true){
                 const walletPubKey = getCurrentWalletPublicKey(session);
                 const launchInlineKeyboard = new InlineKeyboard()
                   .text(`✅ Chain - ${session.chain.value}`, "chainReView")
@@ -621,57 +820,60 @@ async function initiateOwnerMenu(submenu, menuData, stackedMenus) {
                   .text("Cancel", "return")
                   .row()
                   .text('Return', 'return');
-                replyReviewLaunch(ctx, session, launchInlineKeyboard, true);
-                  }else {
-                    ctx.reply('⚠️ You must add the Contract of Your Token first!');
-                  }
+                const sentMessageId = await replyReviewLaunch(ctx, session, launchInlineKeyboard, true, undefined);
+                console.log("review", sentMessageId);
+                session.today_messages.push(sentMessageId.message_id);
               } else if ("variable" in item) {
                 const session = getSession(ctx.from.id);
                 session.isExpectingAnswer = "";
-
-                const resultValidation = await session.token_address.validation(session.token_address.value);
-                if (item.name === "import-wallet" || item.name === "token-address" || resultValidation === true) {
-                  if ("type" in item && item.type === "toggle") {
-                    session[item.variable].value = !session[item.variable].value;
-                    ctx.menu.update();
+                session.current_menu = ctx.menu;
+                // const resultValidation = await session.token_address.validation(session.token_address.value);
+                removeAllMessages(ctx, 0);
+                // if (item.name === "import-wallet" || item.name === "token-address" || resultValidation === true) {
+                if ("type" in item && item.type === "toggle") {
+                  session[item.variable].value = !session[item.variable].value;
+                  const showText = await replyReviewMessage(ctx, session, session[item.variable].category);
+                  ctx.editMessageText(showText, { parse_mode: 'HTML' });
+                  // ctx.menu.update();
+                } else {
+                  session.isExpectingAnswer = item.variable;
+                  if (session.isExpectingAnswer === "importedWallet") {
+                    sentMessageId = await ctx.reply(
+                      "Please input your private key do not share it to the others",
+                      { reply_markup: { force_reply: true } }
+                    );
+                    session.stucked_messages.push(sentMessageId.message_id);
                   } else {
-                    session.isExpectingAnswer = item.variable;
-                    if (session.isExpectingAnswer === "importedWallet") {
-                      ctx.reply(
-                        "Please input your private key do not share it to the others",
-                        { reply_markup: cancelInlineKeyboard }
+                    if (
+                      item.variable === "startTime" ||
+                      item.variable === "endTime"
+                    ) {
+                      sentMessageId = await ctx.reply(
+                        `Timestamp Now is ${Date.now() / 1000
+                        }\nCurrent Value is ${session[item.variable].value === undefined ||
+                          session[item.variable].value === ""
+                          ? "<b>Not Set</b>"
+                          : formatDate(session[item.variable].value)
+                        }\nPlease input in this format : YYYY-MM-DD HH:MM:SS`, { reply_markup: { force_reply: true }, parse_mode: "HTML" }
                       );
+                      session.stucked_messages.push(sentMessageId.message_id)
                     } else {
-                      if (
-                        item.variable === "startTime" ||
-                        item.variable === "endTime"
-                      ) {
-                        ctx.reply(
-                          `Timestamp Now is ${Date.now() / 1000
-                          }\nCurrent Value is ${session[item.variable].value === undefined ||
+                      if (session.wallets.length !== 0) {
+                        sentMessageId = await ctx.reply(
+                          `Please input ${item.text} - Current value is ${session[item.variable].value === undefined ||
                             session[item.variable].value === ""
                             ? "<b>Not Set</b>"
-                            : formatDate(session[item.variable].value)
-                          }\nPlease input in this format : YYYY-MM-DD HH:MM:SS`, { reply_markup: cancelInlineKeyboard, parse_mode: "HTML" }
+                            : session[item.variable].value
+                          }`,
+                          { reply_markup: { force_reply: true }, parse_mode: "HTML" }
                         );
+                        session.stucked_messages.push(sentMessageId.message_id);
                       } else {
-                        if (session.wallets.length !== 0) {
-                          ctx.reply(
-                            `Please input ${item.text} - Current value is ${session[item.variable].value === undefined ||
-                              session[item.variable].value === ""
-                              ? "<b>Not Set</b>"
-                              : session[item.variable].value
-                            }`,
-                            { reply_markup: cancelInlineKeyboard, parse_mode: "HTML" }
-                          );
-                        } else {
-                          ctx.reply('⚠️ Please import or create wallet first!');
-                        }
+                        sentMessageId = await ctx.reply('⚠️ Please import or create wallet first!');
+                        session.isExpectingAnswer = false;
                       }
                     }
                   }
-                } else {
-                  ctx.reply("⚠️ You must add the Contract of Your Token first!")
                 }
               } else {
                 if (item.name == "manage-wallet") {
@@ -685,7 +887,7 @@ async function initiateOwnerMenu(submenu, menuData, stackedMenus) {
                   };
                   const session = getSession(ctx.from.id);
                   if (session.wallets.length === 0) {
-                    ctx.reply("No wallets imported!", { reply_markup: main });
+                    sentMessageId = await ctx.reply("No wallets imported!", { reply_markup: main });
                   } else {
                     let cnt = 1;
                     for (const wallet of session.wallets) {
@@ -707,14 +909,14 @@ async function initiateOwnerMenu(submenu, menuData, stackedMenus) {
                       cnt++;
                     }
                     inlineKeyboard.inline_keyboard.push([{ text: 'Return', callback_data: 'return' }]);
-                    ctx.reply("Please select wallet to manage", {
+                    sentMessageId = await ctx.reply("Please select wallet to manage", {
                       reply_markup: inlineKeyboard,
                     });
                   }
                 } else if (item.name === "ongoing-presales") {
                   const session = getSession(ctx.from.id);
                   if (session.wallets.length === 0) {
-                    ctx.reply(
+                    sentMessageId = await ctx.reply(
                       "⛔️ No wallets selected and can't load your presale info"
                     );
                   } else {
@@ -729,7 +931,7 @@ async function initiateOwnerMenu(submenu, menuData, stackedMenus) {
                     const currentWallet =
                       session.wallets[session.selectedWallet - 1];
                     PoolInfo.find({ deployerAddress: currentWallet })
-                      .then((pools) => {
+                      .then(async (pools) => {
                         const timestampInSeconds = Math.floor(
                           Date.now() / 1000
                         );
@@ -747,20 +949,21 @@ async function initiateOwnerMenu(submenu, menuData, stackedMenus) {
                         inlineKeyboard.inline_keyboard[0].push({ text: 'Return', callback_data: 'return' });
                         console.log(pools);
                         if (pools.length > 0) {
-                          ctx.reply(
+                          sentMessageId = await ctx.reply(
                             "Please make changes to your ongoing presale",
                             { reply_markup: inlineKeyboard }
                           );
                         } else {
-                          ctx.reply("⚠️ No ongoing presale at the moment");
+                          sentMessageId = await ctx.reply("⚠️ No ongoing presale at the moment");
                         }
+                        session.today_messages.push(sentMessageId.message_id);
                       })
                       .catch((err) => console.log(err));
                   }
                 } else if (item.name === "finished-presales") {
                   const session = getSession(ctx.from.id);
                   if (session.wallets.length === 0) {
-                    ctx.reply(
+                    sentMessageId = await ctx.reply(
                       "⛔️ No wallets selected and can't load your presale info"
                     );
                   } else {
@@ -775,7 +978,7 @@ async function initiateOwnerMenu(submenu, menuData, stackedMenus) {
                     const currentWallet =
                       session.wallets[session.selectedWallet - 1];
                     PoolInfo.find({ deployerAddress: currentWallet })
-                      .then((pools) => {
+                      .then(async (pools) => {
                         const timestampInSeconds = Math.floor(
                           Date.now() / 1000
                         );
@@ -789,12 +992,14 @@ async function initiateOwnerMenu(submenu, menuData, stackedMenus) {
                         }
                         inlineKeyboard.inline_keyboard[0].push({ text: 'Return', callback_data: 'return' });
                         if (pools.length > 0) {
-                          ctx.reply(
+                          sentMessageId = await ctx.reply(
                             "Please make changes to your finished presale",
                             { reply_markup: inlineKeyboard }
                           );
+                          session.today_messages.push(sentMessageId.message_id);
                         } else {
-                          ctx.reply("⚠️ No finished presale at the moment");
+                          sentMessageId = await ctx.reply("⚠️ No finished presale at the moment");
+                          session.today_messages.push(sentMessageId.message_id);
                         }
                       })
                       .catch((err) => console.log(err));
@@ -802,7 +1007,7 @@ async function initiateOwnerMenu(submenu, menuData, stackedMenus) {
                 } else if (item.name === "claim-settings") {
                   const session = getSession(ctx.from.id);
                   if (session.wallets.length === 0) {
-                    ctx.reply(
+                    sentMessageId = await ctx.reply(
                       "⛔️ No wallets selected and can't load your presale info"
                     );
                   } else {
@@ -817,7 +1022,7 @@ async function initiateOwnerMenu(submenu, menuData, stackedMenus) {
                     const currentWallet =
                       session.wallets[session.selectedWallet - 1];
                     PoolInfo.find({ deployerAddress: currentWallet })
-                      .then((pools) => {
+                      .then(async (pools) => {
                         const timestampInSeconds = Math.floor(
                           Date.now() / 1000
                         );
@@ -831,11 +1036,13 @@ async function initiateOwnerMenu(submenu, menuData, stackedMenus) {
                         }
                         inlineKeyboard.inline_keyboard[0].push({ text: 'Return', callback_data: 'return' });
                         if (pools.length > 0) {
-                          ctx.reply("Please make changes to claim settings", {
+                          sentMessageId = await ctx.reply("Please make changes to claim settings", {
                             reply_markup: inlineKeyboard,
                           });
                         } else {
-                          ctx.reply("⚠️ No presales to edit claim settings");
+                          sentMessageId = await ctx.reply("⚠️ No presales to edit claim settings");
+                          // console.log("No presale", sentMessageId);
+                          session.today_messages.push(sentMessageId.message_id)
                         }
                       })
                       .catch((err) => console.log(err));
@@ -843,7 +1050,7 @@ async function initiateOwnerMenu(submenu, menuData, stackedMenus) {
                 } else if (item.name === "refund-menu") {
                   const session = getSession(ctx.from.id);
                   if (session.wallets.length === 0) {
-                    ctx.reply(
+                    sentMessageId = await ctx.reply(
                       "⛔️ No wallets selected and can't load your presale info"
                     );
                   } else {
@@ -858,7 +1065,7 @@ async function initiateOwnerMenu(submenu, menuData, stackedMenus) {
                     const currentWallet =
                       session.wallets[session.selectedWallet - 1];
                     PoolInfo.find({ deployerAddress: currentWallet })
-                      .then((pools) => {
+                      .then(async (pools) => {
                         const timestampInSeconds = Math.floor(
                           Date.now() / 1000
                         );
@@ -872,22 +1079,23 @@ async function initiateOwnerMenu(submenu, menuData, stackedMenus) {
                         }
                         inlineKeyboard.inline_keyboard[0].push({ text: "Return", callback_data: 'return' });
                         if (pools.length > 0) {
-                          ctx.reply(
+                          sentMessageId = await ctx.reply(
                             "Please make changes to your finished presale",
                             { reply_markup: inlineKeyboard }
                           );
                         } else {
-                          ctx.reply(
+                          sentMessageId = await ctx.reply(
                             "⚠️ No finished presale to refund at the moment"
                           );
                         }
+                        session.today_messages.push(sentMessageId.message_id)
                       })
                       .catch((err) => console.log(err));
                   }
                 } else if (item.name === "finalize-presale") {
                   const session = getSession(ctx.from.id);
                   if (session.wallets.length === 0) {
-                    ctx.reply(
+                    sentMessageId = await ctx.reply(
                       "⛔️ No wallets selected and can't load your presale info"
                     );
                   } else {
@@ -902,7 +1110,7 @@ async function initiateOwnerMenu(submenu, menuData, stackedMenus) {
                     const currentWallet =
                       session.wallets[session.selectedWallet - 1];
                     PoolInfo.find({ deployerAddress: currentWallet })
-                      .then((pools) => {
+                      .then(async (pools) => {
                         const timestampInSeconds = Math.floor(
                           Date.now() / 1000
                         );
@@ -916,11 +1124,11 @@ async function initiateOwnerMenu(submenu, menuData, stackedMenus) {
                         }
                         inlineKeyboard.inline_keyboard[0].push({ text: 'Return', callback_data: 'return' });
                         if (pools.length > 0) {
-                          ctx.reply("Please finalize your finished presale", {
+                          sentMessageId = await ctx.reply("Please finalize your finished presale", {
                             reply_markup: inlineKeyboard,
                           });
                         } else {
-                          ctx.reply(
+                          sentMessageId = await ctx.reply(
                             "⚠️ No finished presale to finalize at the moment"
                           );
                         }
@@ -930,13 +1138,13 @@ async function initiateOwnerMenu(submenu, menuData, stackedMenus) {
                 } else if (item.name === "find-project") {
                   const session = getSession(ctx.from.id);
                   session.isExpectingAnswer = "find-project";
-                  ctx.reply(
+                  sentMessageId = await ctx.reply(
                     "Search contract address, please input presale address."
                   );
                 } else if (item.name === "search") {
                   const session = getSession(ctx.from.id);
                   session.isExpectingAnswer = "search";
-                  ctx.reply(
+                  sentMessageId = await ctx.reply(
                     "Search contract address, please input token address."
                   );
                 } else if (item.name === "live-presales") {
@@ -949,7 +1157,7 @@ async function initiateOwnerMenu(submenu, menuData, stackedMenus) {
                     ],
                   };
                   PoolInfo.find({})
-                    .then((pools) => {
+                    .then(async (pools) => {
                       const timestampInSeconds = Math.floor(Date.now() / 1000);
                       for (const pool of pools) {
                         if (
@@ -965,12 +1173,13 @@ async function initiateOwnerMenu(submenu, menuData, stackedMenus) {
                       inlineKeyboard.inline_keyboard[0].push({ text: 'Return', callback_data: 'return' })
                       console.log(pools);
                       if (pools.length > 0) {
-                        ctx.reply("All live presales : ", {
+                        sentMessageId = await ctx.reply("All live presales : ", {
                           reply_markup: inlineKeyboard,
                         });
                       } else {
-                        ctx.reply("⚠️ No live presales at the moment");
+                        sentMessageId = await ctx.reply("⚠️ No live presales at the moment");
                       }
+                      session.today_messages.push(sentMessageId.message_id);
                     })
                     .catch((err) => console.log(err));
                 } else if (item.name === "upcoming-presales") {
@@ -983,7 +1192,7 @@ async function initiateOwnerMenu(submenu, menuData, stackedMenus) {
                     ],
                   };
                   PoolInfo.find({})
-                    .then((pools) => {
+                    .then(async (pools) => {
                       const timestampInSeconds = Math.floor(Date.now() / 1000);
                       for (const pool of pools) {
                         if (
@@ -999,12 +1208,13 @@ async function initiateOwnerMenu(submenu, menuData, stackedMenus) {
                       inlineKeyboard.inline_keyboard[0].push({ text: 'Return', callback_data: 'return' });
                       console.log(pools);
                       if (pools.length > 0) {
-                        ctx.reply("All upcoming presales : ", {
+                        sentMessageId = await ctx.reply("All upcoming presales : ", {
                           reply_markup: inlineKeyboard,
                         });
                       } else {
-                        ctx.reply("⚠️ No upcoming presales at the moment");
+                        sentMessageId = await ctx.reply("⚠️ No upcoming presales at the moment");
                       }
+                      session.today_messages.push(sentMessageId.message_id)
                     })
                     .catch((err) => console.log(err));
                 } else if (item.name === "create-wallet") {
@@ -1029,7 +1239,7 @@ async function initiateOwnerMenu(submenu, menuData, stackedMenus) {
 
                     const session = getSession(ctx.from.id);
 
-                    ctx.reply(`Successfully generated New Wallet!\n <b>Private key</b>: <b>${privateKey}</b>\n<b>Address</b>: <b>${address}</b>`, { parse_mode: "HTML", reply_markup: inlineKeyboardCreateWallet });
+                    sentMessageId = await ctx.reply(`Successfully generated New Wallet!\n <b>Private key</b>: <b>${privateKey}</b>\n<b>Address</b>: <b>${address}</b>`, { parse_mode: "HTML", reply_markup: inlineKeyboardCreateWallet });
                     if (!session.wallets.includes(privateKey)) {
                       session.wallets.push(privateKey);
                     }
@@ -1069,14 +1279,20 @@ async function initiateOwnerMenu(submenu, menuData, stackedMenus) {
                       });
                   } catch (err) {
                     console.log(err);
-                    ctx.reply('⚠️ Failed creation')
+                    sentMessageId = await ctx.reply('⚠️ Failed creation')
                   }
                 } else if (item.name === "contributions") {
                   const session = getSession(ctx.from.id);
                   contributionAction(ctx, session);
                 } else {
-                  ctx.reply(`Main Menu`, { reply_markup: main });
+                  returnAction(ctx);
                 }
+              }
+              const session = getSession(ctx.from.id);
+              // console.log("before save : ", sentMessageId);
+              if (sentMessageId !== undefined) {
+                // console.log('adding today message', sentMessageId);
+                session.today_messages.push(sentMessageId.message_id);
               }
             }
           );
@@ -1088,7 +1304,15 @@ async function initiateOwnerMenu(submenu, menuData, stackedMenus) {
       if ("isLast" in item) {
         // console.log("first for register", item.text);
 
-        submenu.back("⬅️ Go back");
+        if (item.name !== "user-menu") {
+          if (item.name !== "presale-settings" && item.name !== "contribution-claim")
+            submenu.back("⬅️ Go back", backMiddleware);
+          else
+            submenu.back("⬅️ Go back", backMiddlewareOwnerMenu);
+          submenu.text('↩️ Return', (ctx) => {
+            returnAction(ctx);
+          });
+        }
         for (const menus of stackedMenus) {
           submenu.register(menus);
           // console.log(menus);
@@ -1097,8 +1321,11 @@ async function initiateOwnerMenu(submenu, menuData, stackedMenus) {
       }
     }
   } else {
-    submenu.text(menuData.text, (ctx) =>
-      ctx.reply(`You pressed ${menuData.text}`)
+    submenu.text(menuData.text, async (ctx) => {
+      const sentMessageId = await ctx.reply(`You pressed ${menuData.text}`)
+      const session = getSession(ctx.from.id);
+      session.today_messages.push(sentMessageId.message_id);
+    }
     );
   }
 }
@@ -1296,22 +1523,58 @@ async function finalizeAndAddLPFunc(PK, poolAddress, chain) {
   }
 }
 
+async function removeStuckedMessages(ctx, session) {
+  try {
+    for (const messageId of session.stucked_messages) {
+      await ctx.api.deleteMessage(ctx.chat?.id, messageId);
+    }
+
+    //clear the list
+    session.stucked_messages = [];
+  } catch (err) {
+    console.error('failed to delete message:', err);
+  }
+}
+
+async function returnAction(ctx) {
+  ctx.answerCallbackQuery({ text: 'Returning main menu' });
+  const session = getSession(ctx.from.id);
+  await removeAllMessages(ctx, 0);
+  ctx.api.editMessageText(ctx.chat.id, session.today_messages[0], 'Main Menu', { reply_markup: main });
+}
+
+async function removeAllMessages(ctx, exceptedIndex = -1) {
+  const session = getSession(ctx.from.id);
+  try {
+    let cnt = 0;
+    let remainValue = -1;
+    for (const messageId of session.today_messages) {
+      try {
+        if (exceptedIndex !== cnt) {
+          await ctx.api.deleteMessage(ctx.chat?.id, messageId);
+        } else {
+          remainValue = messageId;
+        }
+      } catch (err) {
+        console.log("failed delete message" + messageId, err);
+      }
+
+      cnt++;
+    }
+    if (exceptedIndex !== -1)
+      session.today_messages = [remainValue];
+    else
+      session.today_messages = [];
+  } catch (err) {
+    console.error('failed to delete message', err);
+  }
+}
+
 async function mainFunc() {
   try {
-    // Define main menu first
+    await initiateOwnerMenu(main, menuData, []);
 
-    // Define userMenu
-    const userMenu = new Menu("user-menu");
-
-    // Define ownerMenu and initiate its submenus
-    const ownerMenu = new Menu("owner-menu");
-    await initiateOwnerMenu(ownerMenu, ownerMenuData, []);
-    // ownerMenu.back("⬅️ Go back");
-    await initiateOwnerMenu(userMenu, userMenuData, []);
-    // userMenu.back("⬅️ Go back");
-    main.register(userMenu);
-    main.register(ownerMenu);
-
+    // bot.use(isTokenAddressValidated);
     bot.use(main);
 
     // Set bot description (if needed)
@@ -1323,38 +1586,60 @@ async function mainFunc() {
       bot.start();
     }, 3000);
 
-    bot.command("start", (ctx) => {
-      console.log(ctx.from.username);
-      OwnerInfo.findOne({ ownerUsername: ctx.from.username })
-        .then((ownerInfo) => {
-          console.log(`ownerInfo : ${ownerInfo}`);
-          const session = getSession(ctx.from.id);
-          session.wallets = ownerInfo.ownerWallets;
-        })
-        .catch((err) => console.log(err));
-      ctx.reply("Main Menu:", { reply_markup: main });
+    bot.command("start", async (ctx) => {
+      try {
+        const session = getSession(ctx.from.id);
+        session.today_messages.push(ctx.message.message_id);
+        await removeAllMessages(ctx, -1);
+        // ctx.session = initial();
+        console.log(ctx.from.username);
+        OwnerInfo.findOne({ ownerUsername: ctx.from.username })
+          .then((ownerInfo) => {
+            console.log(`ownerInfo : ${ownerInfo}`);
+            const session = getSession(ctx.from.id);
+            session.wallets = ownerInfo.ownerWallets;
+          })
+          .catch((err) => console.log(err));
+        const sentMessageId = await ctx.reply("Main Menu:", { reply_markup: main });
+        session.today_messages.push(sentMessageId.message_id);
+      } catch (err) {
+        console.log(err);
+      }
     });
-    bot.command("ownermenu", (ctx) => {
+    bot.command("ownermenu", async (ctx) => {
       console.log("owner menu : ", ctx.from.username);
+      const session = getSession(ctx.from.id);
+      session.today_messages.push(ctx.message.message_id);
+      await removeAllMessages(ctx, -1);
       OwnerInfo.findOne({ ownerUsername: ctx.from.username })
         .then((ownerInfo) => {
           console.log(`ownerInfo : ${ownerInfo}`);
-          const session = getSession(ctx.from.id);
           session.wallets = ownerInfo.ownerWallets;
         })
         .catch((err) => console.log(err));
-      ctx.reply("Owner Menu:", { reply_markup: ownerMenu });
+      const sentMessageId = await ctx.reply("Owner Menu:", { reply_markup: ownerMenu });
+      session.today_messages.push(sentMessageId.message_id);
     });
-    bot.command("usermenu", (ctx) => {
+    bot.command("usermenu", async (ctx) => {
       console.log("user menu : ", ctx.from.username);
-      ctx.reply("User Menu:", { reply_markup: userMenu });
+      const session = getSession(ctx.from.id);
+      await removeAllMessages(ctx, -1);
+
+      const sentMessageId = await ctx.reply("User Menu:", { reply_markup: userMenu });
+      session.today_messages.push(sentMessageId.message_id);
+
     });
     bot.on("message:text", async (ctx) => {
       const session = getSession(ctx.from.id);
 
+      session.today_messages.push(ctx.message.message_id);
+      session.stucked_messages.push(ctx.message.message_id);
+      // await removeStuckedMessages(ctx, session);
+      let sentMessageId = undefined;
       if (session.isExpectingAnswer && session.isExpectingAnswer !== "") {
         let answer = ctx.message.text;
         // FairlaunchConfigData[session.isExpectingAnswer - 1].value = answer;
+        // main.update();
 
         const walletPubKey = getCurrentWalletPublicKey(session);
         if (
@@ -1365,6 +1650,8 @@ async function mainFunc() {
             const date = new Date(answer);
             answer = Math.floor(date.getTime() / 1000);
             session[session.isExpectingAnswer].value = answer;
+            session.current_menu.update();
+            removeAllMessages(ctx, 0);
             const reviewKeyboard = new InlineKeyboard()
               .text(`✅ Chain - ${session.chain.value}`, "chainReView")
               .text(
@@ -1374,18 +1661,75 @@ async function mainFunc() {
                 }`,
                 "walletReView"
               ).row().text('return', 'return');
-            replyReviewLaunch(ctx, session, reviewKeyboard, false);
+            const showText = await replyReviewMessage(ctx, session, session[session.isExpectingAnswer].category);
+            await ctx.api.editMessageText(ctx.chat.id, session.today_messages[0], showText, { parse_mode: 'HTML', reply_markup: presaleConfigurationMenu })
+            // const sentMessageId = await replyReviewLaunch(ctx, session, presaleConfigurationMenu, false, session[session.isExpectingAnswer].category);
+            // console.log("review launch : ", sentMessageId);
+            // session.today_messages.push(sentMessageId.nessage_id);
+            session.isExpectingAnswer = '';
           } else {
-            ctx.reply("⚠️ please input valid date again YYYY-MM-DD HH:MM:SS");
+            sentMessageId = await ctx.reply("⚠️ please input valid date again YYYY-MM-DD HH:MM:SS");
             return;
+          }
+        } else if (session.isExpectingAnswer === "minimumBuyAmount" || session.isExpectingAnswer === "maximumBuyAmount" || session.isExpectingAnswer === "softcap") {
+          if (isNumber(answer)) {
+            let decimalValue = 18;
+            if (session["accepted_currency"].value === "BlazeX")
+              decimalValue = 9;
+            else if (session["accepted_currency"].value === "USDT")
+              decimalValue = 6;
+            const answerValueToStore = parseUnits(answer, decimalValue);
+            if (await session[session.isExpectingAnswer].validation(answerValueToStore) === true) {
+              session[session.isExpectingAnswer].value = answerValueToStore;
+              removeAllMessages(ctx, 0);
+              const showText = await replyReviewMessage(ctx, session, session[session.isExpectingAnswer].category);
+
+              await ctx.api.editMessageText(ctx.chat.id, session.today_messages[0], showText, { parse_mode: 'HTML', reply_markup: presaleConfigurationMenu })
+              session.isExpectingAnswer = '';
+            }
+            else {
+              sentMessageId = await ctx.reply(
+                `${session[session.isExpectingAnswer].invalid_description}`
+              );
+            }
+          } else {
+            if (await session[session.isExpectingAnswer].validation(answer) === false) {
+              sentMessageId = await ctx.reply(
+                `${session[session.isExpectingAnswer].invalid_description}`
+              );
+            }
+          }
+        } else if (session.isExpectingAnswer === "sellAmount") {
+          if (isNumber(answer)) {
+            let decimalValue = session["token_decimals"].value;
+            const answerValueToStore = parseUnits(answer, decimalValue);
+            if (await session[session.isExpectingAnswer].validation(answerValueToStore.toString()) === true) {
+              session[session.isExpectingAnswer].value = answerValueToStore;
+              removeAllMessages(ctx, 0);
+              const showText = await replyReviewMessage(ctx, session, session[session.isExpectingAnswer].category);
+
+              await ctx.api.editMessageText(ctx.chat.id, session.today_messages[0], showText, { parse_mode: 'HTML', reply_markup: presaleConfigurationMenu })
+              session.isExpectingAnswer = '';
+            }
+            else {
+              sentMessageId = await ctx.reply(
+                `${session[session.isExpectingAnswer].invalid_description}`
+              );
+            }
+          } else {
+            if (await session[session.isExpectingAnswer].validation(answer) === false) {
+              sentMessageId = await ctx.reply(
+                `${session[session.isExpectingAnswer].invalid_description}`
+              );
+            }
           }
         } else if (session.isExpectingAnswer === "find-project") {
           if (isValidEthereumAddress(answer) == true) {
             session.isExpectingAnswer = "";
             PoolInfo.find({ poolAddress: answer })
-              .then((pools) => {
+              .then(async (pools) => {
                 if (pools === null || pools.length === 0) {
-                  ctx.reply("⚠️ No result!");
+                  sentMessageId = await ctx.reply("⚠️ No result!");
                 } else {
                   for (const pool of pools) {
                     const inlineKeyboards = {
@@ -1425,7 +1769,7 @@ async function mainFunc() {
                       callback_data: `EW_${pool.poolAddress}`
                     })
                     inlineKeyboards.inline_keyboard[0].push({ text: 'Return', callback_data: 'return' });
-                    ctx.reply(returnText, { reply_markup: inlineKeyboards });
+                    sentMessageId = await ctx.reply(returnText, { reply_markup: inlineKeyboards });
                   }
                 }
               })
@@ -1433,15 +1777,15 @@ async function mainFunc() {
                 console.log(err);
               });
           } else {
-            ctx.reply("⚠️ Please input valid address again");
+            sentMessageId = await ctx.reply("⚠️ Please input valid address again");
           }
         } else if (session.isExpectingAnswer === "search") {
           if (isValidEthereumAddress(answer) == true) {
             session.isExpectingAnswer = "";
             PoolInfo.find({ token_address: answer })
-              .then((pools) => {
+              .then(async (pools) => {
                 if (pools === null || pools.length === 0) {
-                  ctx.reply("⚠️ No result!");
+                  sentMessageId = await ctx.reply("⚠️ No result!");
                 } else {
                   for (const pool of pools) {
                     const inlineKeyboards = {
@@ -1481,7 +1825,7 @@ async function mainFunc() {
                       callback_data: `EW_${pool.poolAddress}`
                     })
                     inlineKeyboards.inline_keyboard[0].push({ text: 'Return', callback_data: 'return' });
-                    ctx.reply(returnText, { reply_markup: inlineKeyboards });
+                    sentMessageId = await ctx.reply(returnText, { reply_markup: inlineKeyboards });
                   }
                 }
               })
@@ -1489,7 +1833,7 @@ async function mainFunc() {
                 console.log(err);
               });
           } else {
-            ctx.reply("⚠️ Please input valid address again");
+            sentMessageId = await ctx.reply("⚠️ Please input valid address again");
           }
         } else if (session.isExpectingAnswer === "token_address") {
           const resultValidation = await session.token_address.validation(answer);
@@ -1498,21 +1842,29 @@ async function mainFunc() {
             const web3 = new Web3(provider);
             const tokenAddress = answer;
             console.log("answer", tokenAddress);
-            const tokenContract = new web3.eth.Contract(tokenAbi, tokenAddress);
             try {
+              const tokenContract = new web3.eth.Contract(tokenAbi, tokenAddress);
+
               const name = await tokenContract.methods.name().call();
+              session.token_name.value = name;
               console.log("name", name);
               const symbol = await tokenContract.methods.symbol().call();
-              console.log("symbol", symbol);
-
-              session.token_name.value = name;
               session.token_symbol.value = symbol;
+              console.log("symbol", symbol);
+              const decimals = await tokenContract.methods.decimals().call();
+              console.log("decimals", decimals);
+
+              session.token_decimals = decimals;
+              const supply = await tokenContract.methods.totalSupply().call();
+              session.token_supply.value = supply;
+              console.log("supply", supply);
 
               session[session.isExpectingAnswer].value = answer;
-              session.isExpectingAnswer = "";
               // ctx.reply(`Token Name : ${name}\nToken Symbol : ${symbol}`, {
               //   reply_markup: main,
               // });
+              session.current_menu.update();
+              removeAllMessages(ctx, 0);
               const reviewKeyboard = new InlineKeyboard()
                 .text(`✅ Chain - ${session.chain.value}`, "chainReView")
                 .text(
@@ -1522,15 +1874,22 @@ async function mainFunc() {
                   }`,
                   "walletReView"
                 ).row().text('Return', 'return');
-              replyReviewLaunch(ctx, session, reviewKeyboard, false);
+              const showText = await replyReviewMessage(ctx, session, session[session.isExpectingAnswer].category);
+              // console.log('show Text', showText);
+              await ctx.api.editMessageText(ctx.chat.id, session.today_messages[0], showText, { parse_mode: 'HTML', reply_markup: tokenSetupMenu })
+              // await bot.api.editMessageReplyMarkup(ctx.chat.id, session.today_messages[0], {reply_markup : tokenSetupMenu});
+              // const sentMessageId = await replyReviewLaunch(ctx, session, tokenSetupMenu, false, session[session.isExpectingAnswer].category);
+              // console.log("review launch : ", sentMessageId);
+              // session.today_messages.push(sentMessageId.message_id);
+              session.isExpectingAnswer = "";
             } catch (err) {
               console.log(err);
-              ctx.reply(
+              sentMessageId = await ctx.reply(
                 `⚠️ Can't load token info on ${session.chain.value} testnet, please input again`
               );
             }
           } else {
-            ctx.reply(session.token_address.invalid_description);
+            sentMessageId = await ctx.reply(session.token_address.invalid_description);
           }
         } else if (session.isExpectingAnswer.startsWith("amountToContribute")) {
           const parts = session.isExpectingAnswer.split("amountToContribute");
@@ -1538,14 +1897,14 @@ async function mainFunc() {
             session.amountToContribute = answer;
             session.isExpectingAnswer = ""
             const inlineKeyboardContribute = new InlineKeyboard().text(`Contribute ${answer}`, `user_contribute${parts[1]}`);
-            ctx.reply(`Amount to Contribute : <b>${answer}</b>\n`, { reply_markup: inlineKeyboardContribute });
+            sentMessageId = await ctx.reply(`Amount to Contribute : <b>${answer}</b>\n`, { reply_markup: inlineKeyboardContribute });
           } else {
-            ctx.reply('please input correct amount');
+            sentMessageId = await ctx.reply('please input correct amount');
           }
         } else {
           if (await session[session.isExpectingAnswer].validation(answer)) {
-            console.log("total selling amount", answer);
             session[session.isExpectingAnswer].value = answer;
+            removeAllMessages(ctx, 0);
             if (session.isExpectingAnswer === "importedWallet") {
               if (!session.wallets.includes(answer)) {
                 session.wallets.push(answer);
@@ -1583,8 +1942,10 @@ async function mainFunc() {
                 .catch((err) => {
                   console.log("Owner find", err);
                 });
-              ctx.reply(`Wallet Successfuly Imported`);
+              sentMessageId = await ctx.reply(`Wallet Successfuly Imported`);
             } else {
+              session.current_menu.update();
+              console.log("current", session.current_menu);
               const reviewKeyboard = new InlineKeyboard()
                 .text(`✅ Chain - ${session.chain.value}`, "chainReView")
                 .text(
@@ -1594,21 +1955,39 @@ async function mainFunc() {
                   }`,
                   "walletReView"
                 ).row().text('Return', 'return');
-              replyReviewLaunch(ctx, session, reviewKeyboard, false);
+              let showMenu;
+              if (session[session.isExpectingAnswer].category === "setup") {
+                showMenu = tokenSetupMenu;
+              } else if (session[session.isExpectingAnswer].category === "configuration") {
+                showMenu = presaleConfigurationMenu;
+              } else if (session[session.isExpectingAnswer].category === 'information') {
+                showMenu = presaleInformationMenu;
+              } else {
+                showMenu = reviewKeyboard;
+              }
+              const showText = await replyReviewMessage(ctx, session, session[session.isExpectingAnswer].category);
+
+              await ctx.api.editMessageText(ctx.chat.id, session.today_messages[0], showText, { parse_mode: 'HTML', reply_markup: showMenu })
+              // await bot.api.editMessageReplyMarkup(ctx.chat.id, session.today_messages[0], {reply_markup : showMenu})
+              // const sentMessageId = await replyReviewLaunch(ctx, session, showMenu, false, session[session.isExpectingAnswer].category);
+              // console.log("review : ", sentMessageId)
+              // session.today_messages.push(sentMessageId.message_id);
               // ctx.reply(`${session.isExpectingAnswer} is ${answer}`, {
               //   reply_markup: main,
               // });
             }
             session.isExpectingAnswer = "";
           } else {
-            ctx.reply(
+            sentMessageId = await ctx.reply(
               `${session[session.isExpectingAnswer].invalid_description}`
             );
           }
         }
       } else {
-        ctx.reply("Send /start to see the menu");
+        sentMessageId = await ctx.reply("Send /start to see the menu");
       }
+      if (sentMessageId !== undefined)
+        session.today_messages.push(sentMessageId.message_id);
     });
     bot.callbackQuery("click-cancel-input", async (ctx) => {
       const session = getSession(ctx.from.id);
@@ -1616,11 +1995,12 @@ async function mainFunc() {
       await ctx.answerCallbackQuery({
         text: "Cancelled",
       });
-      ctx.reply("Main Menu", { reply_markup: main });
+      returnAction(ctx);
     });
     bot.callbackQuery("launch", async (ctx) => {
       const session = getSession(ctx.from.id);
       const keysOfSession = Object.keys(session);
+      let sentMessageId = undefined;
       let validation_result = true;
       let errors = [];
       for (const variable of keysOfSession) {
@@ -1650,17 +2030,20 @@ async function mainFunc() {
           await ctx.answerCallbackQuery({
             text: "No wallet is conencted, please import wallet first!",
           });
-          ctx.reply("No wallet is connected, please import wallet first!");
+          sentMessageId = await ctx.reply("No wallet is connected, please import wallet first!");
         }
       } else {
         await ctx.answerCallbackQuery({
           text: "Please review your data and input correct data!",
         });
-        ctx.reply(errors.join("\n"));
+        sentMessageId = await ctx.reply(errors.join("\n"));
       }
+      if (sentMessageId !== undefined)
+        session.today_messages.push(sentMessageId.message_id);
     });
     bot.on("callback_query", async (ctx) => {
       const data = ctx.callbackQuery.data;
+      let sentMessageId = undefined;
       if (data.startsWith("ownerwallet_")) {
         const parts = data.split("ownerwallet_");
         if (parts.length > 1) {
@@ -1690,7 +2073,7 @@ async function mainFunc() {
 
           const balanceResult = await getTotalBalance(addressHex);
 
-          ctx.reply(`Current Wallet's information : ${addressHex}\nEtheruem\n  ---- ETH: ${balanceResult.Ethereum.NATIVE}\n  ---- USDT: ${balanceResult.Ethereum.USDT}\n  ---- BalzeX: ${balanceResult.Ethereum.BLAZEX}\nBinance\n  ---- BNB: ${balanceResult.Binance.NATIVE}\n  ---- USDT: ${balanceResult.Binance.USDT}\n  ---- BLAZEX: ${balanceResult.Binance.BLAZEX}`, { reply_markup: inlineKeyboardOwnerWallet });
+          sentMessageId = await ctx.reply(`Current Wallet's information : ${addressHex}\nEtheruem\n  ---- ETH: ${balanceResult.Ethereum.NATIVE}\n  ---- USDT: ${balanceResult.Ethereum.USDT}\n  ---- BalzeX: ${balanceResult.Ethereum.BLAZEX}\nBinance\n  ---- BNB: ${balanceResult.Binance.NATIVE}\n  ---- USDT: ${balanceResult.Binance.USDT}\n  ---- BLAZEX: ${balanceResult.Binance.BLAZEX}`, { reply_markup: inlineKeyboardOwnerWallet });
         }
       }
       else if (data.startsWith("userwallet_")) {
@@ -1715,7 +2098,7 @@ async function mainFunc() {
             .row()
             .text('Return', 'return');
 
-          ctx.reply("Current Owner Wallet's Information : " + addressHex, { reply_markup: inlineKeybardUserWallet });
+          sentMessageId = await ctx.reply("Current Owner Wallet's Information : " + addressHex, { reply_markup: inlineKeybardUserWallet });
         }
       } else if (data.startsWith("ongoing")) {
         let poolChain;
@@ -1751,7 +2134,7 @@ async function mainFunc() {
                 // ctx.reply(`The ongoing pool is ${poolAddress}`);
               }
             })
-            .catch((err) => { console.log(err); ctx.reply(`Wrong address inputed`) });
+            .catch(async (err) => { console.log(err); sentMessageId = await ctx.reply(`Wrong address inputed`) });
         }
       } else if (data.startsWith("finished")) {
         const parts = data.split("finished");
@@ -1774,14 +2157,14 @@ async function mainFunc() {
                 // ctx.reply(`The ongoing pool is ${poolAddress}`);
               }
             })
-            .catch((err) => { console.log(err); ctx.reply(`Wrong address inputed`) });
+            .catch(async (err) => { console.log(err); sentMessageId = await ctx.reply(`Wrong address inputed`) });
         }
       } else if (data.startsWith("Contribute_")) {
         const parts = data.split("Contribute_");
         if (parts.length > 1) {
           const session = getSession(ctx.from.id);
           const poolAddress = parts[1];
-          ctx.reply(`Amount to Contribute : `);
+          sentMessageId = await ctx.reply(`Amount to Contribute : `);
           session.isExpectingAnswer = `amountToContribute${poolAddress}`;
         }
       } else if (data.startsWith("user_contribute")) {
@@ -1789,7 +2172,7 @@ async function mainFunc() {
         const session = getSession(ctx.from.id);
         if (parts.length > 1) {
           const poolAddress = parts[1];
-          ctx.reply(`Contributing ${session.amountToContribute}\n`);
+          sentMessageId = await ctx.reply(`Contributing ${session.amountToContribute}\n`);
           const privateKey = session.wallets[session.selectedWallet - 1];
           // Setup provider with the private key
           const provider = new HDWalletProvider({
@@ -1812,7 +2195,7 @@ async function mainFunc() {
                 await presaleContract.methods.buyWithToken(ethUtil.zeroAddress, session.token_address.value).send({ from: sender, value: session.amountToContribute });
               }, 10000);
             }
-            ctx.reply('✅ Successfully contributed!!!');
+            sentMessageId = await ctx.reply('✅ Successfully contributed!!!');
             ContributionInfo.findOne({ userWallet: sender, poolAddress: poolAddress })
               .then(contribution => {
                 const currentTime = new Date();
@@ -1846,7 +2229,7 @@ async function mainFunc() {
         if (parts.length > 1) {
           const poolAddress = parts[1];
           const EWInlineKeyboard = new InlineKeyboard().text('I am fine with it! Emergency Withdraw!!!', `EW_PROCEED${poolAddress}`).text('Return', 'return');
-          ctx.reply('It will take 10% fee, please consider if you are fine with it!', { reply_markup: EWInlineKeyboard })
+          sentMessageId = await ctx.reply('It will take 10% fee, please consider if you are fine with it!', { reply_markup: EWInlineKeyboard })
         }
       } else if (data.startsWith('EW_PROCEED')) {
         const parts = data.split('EW_PROCEED');
@@ -1854,7 +2237,7 @@ async function mainFunc() {
           const session = getSession(ctx.from.id)
           const poolAddress = parts[1];
 
-          ctx.reply(`⚠️ Emergency Withdrawing\n`);
+          sentMessageId = await ctx.reply(`⚠️ Emergency Withdrawing\n`);
           const privateKey = session.wallets[session.selectedWallet - 1];
           // Setup provider with the private key
           const provider = new HDWalletProvider({
@@ -1869,23 +2252,23 @@ async function mainFunc() {
           const presaleContract = new web3.eth.Contract(fairlaunchAbi, poolAddress);
           await presaleContract.methods.emergencyWithdraw().send({ from: sender });
 
-          ctx.reply(`✅ Successfully Emergency Withdrawn!!!`)
+          sentMessageId = await ctx.reply(`✅ Successfully Emergency Withdrawn!!!`)
         }
       } else if (data.startsWith('deposit_')) {
         const parts = data.split('deposit_');
         const walletAddress = parts[1];
-        ctx.reply(`Wallet Address: ${walletAddress}\nYou can send USDT/BLAZEX/ETH here`);
+        sentMessageId = await ctx.reply(`Wallet Address: ${walletAddress}\nYou can send USDT/BLAZEX/ETH here`);
       } else if (data.startsWith('balance_')) {
         const parts = data.split('balance_');
         const walletAddress = parts[1];
 
         const balanceResult = await getTotalBalance(walletAddress);
 
-        ctx.reply(`Etheruem\n  ---- ETH: ${balanceResult.Ethereum.NATIVE}\n  ---- USDT: ${balanceResult.Ethereum.USDT}\n  ---- BalzeX: ${balanceResult.Ethereum.BLAZEX}\nBinance\n  ---- BNB: ${balanceResult.Binance.NATIVE}\n  ---- USDT: ${balanceResult.Binance.USDT}\n  ---- BLAZEX: ${balanceResult.Binance.BLAZEX}`);
+        sentMessageId = await ctx.reply(`Etheruem\n  ---- ETH: ${balanceResult.Ethereum.NATIVE}\n  ---- USDT: ${balanceResult.Ethereum.USDT}\n  ---- BalzeX: ${balanceResult.Ethereum.BLAZEX}\nBinance\n  ---- BNB: ${balanceResult.Binance.NATIVE}\n  ---- USDT: ${balanceResult.Binance.USDT}\n  ---- BLAZEX: ${balanceResult.Binance.BLAZEX}`);
       } else if (data === 'my-presales') {
-        ctx.reply('My-Presales', { reply_markup: ongoingPresaleMenu });
+        sentMessageId = await ctx.reply('My-Presales', { reply_markup: ongoingPresaleMenu });
       } else if (data === 'start-fairlaunch') {
-        ctx.reply('Start Fairlaunch', { reply_markup: ownerMenu });
+        sentMessageId = await ctx.reply('Start Fairlaunch', { reply_markup: ownerMenu });
       } else if (data.startsWith('removeWallet_')) {
         const session = getSession(ctx.from.id);
         const index = session.selectedWallet - 1;
@@ -1936,9 +2319,9 @@ async function mainFunc() {
         const parts = data.split('showPrivateKey_');
         if (parts.length > 1) {
           const session = getSession(ctx.from.id);
-          ctx.reply(`Private key: <b>${session.wallets[parts[1] - 1]}</b>`, { parse_mode: 'HTML' });
+          sentMessageId = await ctx.reply(`Private key: <b>${session.wallets[parts[1] - 1]}</b>`, { parse_mode: 'HTML' });
         } else {
-          ctx.reply(`⚠️ Unable to show you private key.`);
+          sentMessageId = await ctx.reply(`⚠️ Unable to show you private key.`);
         }
       } else if (data.startsWith('userContributionAndClaim_')) {
         const session = getSession(ctx.from.id);
@@ -1968,9 +2351,9 @@ async function mainFunc() {
           const presaleContract = new web3.eth.Contract(factoryABI, presale_address);
           const isFinalized = await presaleContract.methods.isFinalized().call({ from: sender });
           PoolInfo.find({ poolAddress: poolAddress, chain: poolChain })
-            .then((pools) => {
+            .then(async (pools) => {
               if (pools === null || pools.length === 0) {
-                ctx.reply("⚠️ No result!");
+                sentMessageId = await ctx.reply("⚠️ No result!");
               } else {
                 for (const pool of pools) {
                   const inlineKeyboardUserProject = new InlineKeyboard();
@@ -2007,7 +2390,7 @@ async function mainFunc() {
                       `EW_${pool.poolAddress}`
                     )
                     inlineKeyboardUserProject.text('Return', 'return');
-                    ctx.reply(returnText, { reply_markup: inlineKeyboardUserProject });
+                    sentMessageId = await ctx.reply(returnText, { reply_markup: inlineKeyboardUserProject });
                   } else {
                     `Overview of Token\n
                       <b>Project Description</b>: ${pool.description}\n
@@ -2033,7 +2416,7 @@ async function mainFunc() {
                       `userClaim_${pool.poolAddress}`
                     )
                     inlineKeyboardUserProject.text('Return', 'return');
-                    ctx.reply(returnText, { reply_markup: inlineKeyboardUserProject });
+                    sentMessageId = await ctx.reply(returnText, { reply_markup: inlineKeyboardUserProject });
                   }
                 }
               }
@@ -2063,7 +2446,7 @@ async function mainFunc() {
 
             const presaleContract = new web3.eth.Contract(fairlaunchAbi, poolAddress);
             await presaleContract.methods.claim().send({ from: sender });
-            ctx.reply('✅ Claiming successfully submitted');
+            sentMessageId = await ctx.reply('✅ Claiming successfully submitted');
           } catch (err) {
             console.log('user claim!!', err);
           }
@@ -2088,10 +2471,10 @@ async function mainFunc() {
             await finalizeAndAddLPFunc(session.walltes[session.selectedWallet - 1], poolAddress, poolChain);
           } catch (err) {
             console.log(err);
-            ctx.reply(`⚠️ Failed finalize!!!`)
+            sentMessageId = await ctx.reply(`⚠️ Failed finalize!!!`)
           }
         } else {
-          ctx.reply(`⚠️ Failed finalize!!!`)
+          sentMessageId = await ctx.reply(`⚠️ Failed finalize!!!`)
         }
       } else if (data.startsWith('refund_')) {
         let poolChain;
@@ -2111,15 +2494,17 @@ async function mainFunc() {
             await cancelAndRefundFunc(session.walltes[session.selectedWallet - 1], poolAddress, poolChain);
           } catch (err) {
             console.log(err);
-            ctx.reply(`⚠️ Failed refund!!!`)
+            sentMessageId = await ctx.reply(`⚠️ Failed refund!!!`)
           }
         } else {
-          ctx.reply(`⚠️ Failed refund!!!`)
+          sentMessageId = await ctx.reply(`⚠️ Failed refund!!!`)
         }
       } else if (data === 'return') {
-        ctx.answerCallbackQuery({ text: 'Returning main menu' });
-        ctx.reply('Main Menu', { reply_markup: main });
+        returnAction(ctx);
       }
+      const session = getSession(ctx.from.id);
+      if (sentMessageId !== undefined)
+        session.today_messages.push(sentMessageId.message_id);
     })
   } catch (err) {
     console.log(err);
