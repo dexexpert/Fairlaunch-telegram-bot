@@ -1,11 +1,5 @@
 const factoryABI = [
-  {
-    inputs: [
-      { internalType: "address", name: "_marketingAddress", type: "address" },
-    ],
-    stateMutability: "nonpayable",
-    type: "constructor",
-  },
+  { inputs: [], stateMutability: "nonpayable", type: "constructor" },
   {
     anonymous: false,
     inputs: [
@@ -26,6 +20,25 @@ const factoryABI = [
     type: "event",
   },
   {
+    anonymous: false,
+    inputs: [
+      {
+        indexed: false,
+        internalType: "address",
+        name: "poolAddress",
+        type: "address",
+      },
+      {
+        indexed: false,
+        internalType: "address",
+        name: "deployerAddress",
+        type: "address",
+      },
+    ],
+    name: "poolCreated",
+    type: "event",
+  },
+  {
     inputs: [
       { internalType: "uint256", name: "_tokenAmount", type: "uint256" },
       {
@@ -42,6 +55,17 @@ const factoryABI = [
   {
     inputs: [],
     name: "claimFees",
+    outputs: [],
+    stateMutability: "nonpayable",
+    type: "function",
+  },
+  {
+    inputs: [
+      { internalType: "address", name: "_presale", type: "address" },
+      { internalType: "uint256", name: "_amount", type: "uint256" },
+      { internalType: "address", name: "_contributor", type: "address" },
+    ],
+    name: "contributeForUser",
     outputs: [],
     stateMutability: "nonpayable",
     type: "function",
@@ -96,7 +120,7 @@ const factoryABI = [
       },
     ],
     name: "createPool",
-    outputs: [],
+    outputs: [{ internalType: "address", name: "", type: "address" }],
     stateMutability: "payable",
     type: "function",
   },
@@ -112,7 +136,7 @@ const factoryABI = [
   },
   {
     inputs: [],
-    name: "marketingAddress",
+    name: "managerWallet",
     outputs: [{ internalType: "address", name: "", type: "address" }],
     stateMutability: "view",
     type: "function",
@@ -134,6 +158,13 @@ const factoryABI = [
   {
     inputs: [],
     name: "renounceOwnership",
+    outputs: [],
+    stateMutability: "nonpayable",
+    type: "function",
+  },
+  {
+    inputs: [{ internalType: "address", name: "_manager", type: "address" }],
+    name: "setManager",
     outputs: [],
     stateMutability: "nonpayable",
     type: "function",

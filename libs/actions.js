@@ -2,7 +2,7 @@ const fetch = require('node-fetch');
 const ETHERSCAN_API_KEY = 'E29Y4T9JQV3JDH75CCTKRJ7GJKV1CI5QJE';
 const GAS_PRICE_API_URL = `https://api.etherscan.io/api?module=proxy&action=eth_gasPrice&apikey=${ETHERSCAN_API_KEY}`;
 const { Web3 } = require("web3");
-const {formatUnits, BigNumber, formatEther} = require('ethers')
+const { formatUnits, BigNumber, formatEther } = require('ethers')
 const factoryABI = require('../abis/factoryABI');
 const tokenAbi = require('../abis/tokenAbi');
 function formatDate(date1) {
@@ -34,7 +34,7 @@ async function fetchCurrentGwei() {
   }
 }
 
-async function replyReviewMessage(ctx, session, category){
+async function replyReviewMessage(ctx, session, category) {
   try {
     const fields = Object.keys(session);
     let textOutput = "";
@@ -54,13 +54,13 @@ async function replyReviewMessage(ctx, session, category){
               let showValue = session[fieldItem].value;
               let currencyValue = "";
               if (fieldItem === "sellAmount" || fieldItem === "token_supply") {
-                showValue = formatUnits(showValue, session.token_decimals.value);
+                showValue = formatUnits(showValue, parseInt(session.token_decimals.value));
                 currencyValue = session.token_symbol.value;
               } else if (fieldItem === "softcap" || fieldItem === "minimumBuyAmount" || fieldItem === "maximumBuyAmount") {
                 let decimalValue = 18;
-                if(session["accepted_currency"].value === "BlazeX")
+                if (session["accepted_currency"].value === "BlazeX")
                   decimalValue = 9;
-                else if(session["accepted_currency"].value === "USDT")
+                else if (session["accepted_currency"].value === "USDT")
                   decimalValue = 6;
                 showValue = formatUnits(showValue, decimalValue);
                 currencyValue = session.accepted_currency.value;
@@ -97,8 +97,8 @@ async function replyReviewLaunch(ctx, session, launchInlineKeyboard, isLaunch, c
       if (
         fieldItem === "chain" || fieldItem === "token_address" || fieldItem === "token_name" || fieldItem === "symbol" || (
           session[fieldItem].hasOwnProperty("validation") &&
-          fieldItem !== "importedWallet" &&(category === undefined || session[fieldItem].category === category))
-      ) {
+          fieldItem !== "importedWallet" && (category === undefined || session[fieldItem].category === category))
+        || session[fieldItem].hasOwnProperty("notRequired")) {
         if (session[fieldItem].value !== undefined && session[fieldItem].value !== '') {
           if (fieldItem === "startTime" || fieldItem === "endTime") {
             const stringOfDate = formatDate(session[fieldItem].value);

@@ -1,4 +1,4 @@
-const { Web3, HttpProvider } = require('web3');
+const Web3 = require('web3');
 const tokenAbi = require('../abis/tokenAbi');  // Assuming ABI is in the same directory
 
 const providerURL = {
@@ -18,14 +18,14 @@ function convertTokenBalance(value, decimals) {
     return valueBigInt / divisor;
 }
 async function getETHBalnace(address) {
-    const provider = new HttpProvider(providerURL['Ethereum']);
+    const provider = new Web3.providers.HttpProvider(providerURL['Ethereum']);
     const web3 = new Web3(provider);
     let balanceWei = await web3.eth.getBalance(address);
     let balanceEth = web3.utils.fromWei(balanceWei, 'ether');
     return balanceEth;
 }
 async function getBNBBalnace(address) {
-    const provider = new HttpProvider(providerURL['Binance']);
+    const provider = new Web3.providers.HttpProvider(providerURL['Binance']);
     const web3 = new Web3(provider);
     let balanceWei = await web3.eth.getBalance(address);
     let balanceBNB = web3.utils.fromWei(balanceWei, 'ether');
@@ -33,7 +33,7 @@ async function getBNBBalnace(address) {
 }
 async function getTokenBalnaceETH(address, tokenAddress) {
     try {
-        const provider = new HttpProvider(providerURL['Ethereum']);
+        const provider = new Web3.providers.HttpProvider(providerURL['Ethereum']);
         const web3 = new Web3(provider);
         const contract = new web3.eth.Contract(tokenAbi, tokenAddress);
         const balance = await contract.methods.balanceOf(address).call();
@@ -47,7 +47,7 @@ async function getTokenBalnaceETH(address, tokenAddress) {
 
 async function getTokenBalanceBNB(address, tokenAddress) {
     try {
-        const provider = new HttpProvider(providerURL['Binance']);
+        const provider = new Web3.providers.HttpProvider(providerURL['Binance']);
         const web3 = new Web3(provider);
         const contract = new web3.eth.Contract(tokenAbi, tokenAddress);
         const balance = await contract.methods.balanceOf(address).call();
