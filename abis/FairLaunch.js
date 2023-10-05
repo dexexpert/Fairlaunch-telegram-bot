@@ -307,6 +307,13 @@ const fairlaunchAbi = [
   },
   {
     inputs: [],
+    name: "cancelAndRefund",
+    outputs: [],
+    stateMutability: "nonpayable",
+    type: "function",
+  },
+  {
+    inputs: [],
     name: "claim",
     outputs: [],
     stateMutability: "nonpayable",
@@ -364,6 +371,19 @@ const fairlaunchAbi = [
     name: "finalize",
     outputs: [],
     stateMutability: "nonpayable",
+    type: "function",
+  },
+  {
+    inputs: [],
+    name: "finalizeStatus",
+    outputs: [
+      {
+        internalType: "bool",
+        name: "",
+        type: "bool",
+      },
+    ],
+    stateMutability: "view",
     type: "function",
   },
   {
@@ -515,6 +535,32 @@ const fairlaunchAbi = [
   {
     inputs: [],
     name: "managerWallet",
+    outputs: [
+      {
+        internalType: "address",
+        name: "",
+        type: "address",
+      },
+    ],
+    stateMutability: "view",
+    type: "function",
+  },
+  {
+    inputs: [],
+    name: "maxContributionAmount",
+    outputs: [
+      {
+        internalType: "uint256",
+        name: "",
+        type: "uint256",
+      },
+    ],
+    stateMutability: "view",
+    type: "function",
+  },
+  {
+    inputs: [],
+    name: "maxContributor",
     outputs: [
       {
         internalType: "address",
@@ -702,6 +748,19 @@ const fairlaunchAbi = [
   },
   {
     inputs: [],
+    name: "totalContributor",
+    outputs: [
+      {
+        internalType: "uint256",
+        name: "",
+        type: "uint256",
+      },
+    ],
+    stateMutability: "view",
+    type: "function",
+  },
+  {
+    inputs: [],
     name: "totalDepositAmount",
     outputs: [
       {
@@ -716,6 +775,19 @@ const fairlaunchAbi = [
   {
     inputs: [],
     name: "totalTokensSold",
+    outputs: [
+      {
+        internalType: "uint256",
+        name: "",
+        type: "uint256",
+      },
+    ],
+    stateMutability: "view",
+    type: "function",
+  },
+  {
+    inputs: [],
+    name: "totalUsers",
     outputs: [
       {
         internalType: "uint256",
@@ -819,4 +891,4 @@ const fairlaunchAbi = [
   },
 ];
 
-module.exports = fairlaunchAbi
+module.exports = fairlaunchAbi;

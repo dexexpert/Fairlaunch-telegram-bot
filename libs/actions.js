@@ -1,10 +1,12 @@
 const fetch = require('node-fetch');
 const ETHERSCAN_API_KEY = 'E29Y4T9JQV3JDH75CCTKRJ7GJKV1CI5QJE';
 const GAS_PRICE_API_URL = `https://api.etherscan.io/api?module=proxy&action=eth_gasPrice&apikey=${ETHERSCAN_API_KEY}`;
-const { Web3 } = require("web3");
+const Web3 = require("web3");
+const HDWalletProvider = require("@truffle/hdwallet-provider");
 const { formatUnits, BigNumber, formatEther } = require('ethers')
 const factoryABI = require('../abis/factoryABI');
 const tokenAbi = require('../abis/tokenAbi');
+const fairlaunchAbi = require('../abis/FairLaunch');
 function formatDate(date1) {
   const date = new Date(date1 * 1000);
   const year = date.getFullYear();
@@ -157,7 +159,7 @@ async function getPresaleInformation(presale_address, token_address, session) {
 
     const accounts = await web3.eth.getAccounts();
     const sender = accounts[0];
-    const presaleContract = new web3.eth.Contract(factoryABI, presale_address);
+    const presaleContract = new web3.eth.Contract(fairlaunchAbi, presale_address);
     const tokenAddress = await presaleContract.methods.tokenAddress().call({ from: sender });
 
     const tokenContract = new web3.eth.Contract(tokenAbi, tokenAddress);
@@ -166,18 +168,31 @@ async function getPresaleInformation(presale_address, token_address, session) {
     const supply = tokenContract.methods.totalSupply().call({ from: sender });
 
     const sellAmount = await presaleContract.methods.sellAmount().call({ from: sender });
-    const softCap = await presaleContract.methods.softCap().call({ from: sender });
+    console.log("sellAmount", sellAmount);
+    const softCap = await presaleContract.methods.softcap().call({ from: sender });
+    console.log("softCap", softCap);
     const totalRaises = await presaleContract.methods.totalDepositAmount().call({ from: sender });
-    const totalContributors = await presaleContract.methods.totalContributors().call({ from: sender });
+    console.log("totalRaises", totalRaises);
+    const totalContributors = await presaleContract.methods.totalContributor().call({ from: sender });
+    console.log("totalContributors", totalContributors);
     const liquidityRatio = await presaleContract.methods.calcCurrentRate().call({ from: sender });
+    console.log("liquidityRatio", liquidityRatio);
     const marketCap = await presaleContract.methods.calcInitialMarketCapInToken().call({ from: sender });
+    console.log("marketCap", marketCap);
     const userRes = await presaleContract.methods.user(sender).call({ from: sender });
+    console.log("userRes", userRes);
     const minimumBuyAmount = await presaleContract.methods.minimumBuyAmount().call({ from: sender });
+    console.log("minimumBuyAmount", minimumBuyAmount);
     const maximumBuyAmount = await presaleContract.methods.maximumBuyAmount().call({ from: sender });
+    console.log("maximumBuyAmount", maximumBuyAmount);
     const startTime = await presaleContract.methods.startTime().call({ from: sender });
+    console.log("startTime", startTime);
     const endTime = await presaleContract.methods.endTime().call({ from: sender });
+    console.log("endTime", endTime);
     const maxContributionAmount = await presaleContract.methods.maxContributionAmount().call({ from: sender });
+    console.log("maxContributionAmount", maxContributionAmount);
     const isFinalized = await presaleContract.methods.isFinalized().call({ from: sender });
+    console.log("isFinalized", isFinalized);s
     return {
       tokenAddress,
       name,

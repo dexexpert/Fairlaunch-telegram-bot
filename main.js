@@ -5,7 +5,7 @@ const Wallet = require("ethereumjs-wallet");
 const EC = require("elliptic").ec;
 const ec = new EC("secp256k1");
 const TelegramBot = require("node-telegram-bot-api");
-const { parseUnits, BigNumber } = require("ethers");
+const { parseUnits, BigNumber, formatUnits } = require("ethers");
 const { ethers } = require("ethers");
 const factoryABI = require("./abis/factoryABI");
 const fairlaunchAbi = require("./abis/FairLaunch");
@@ -31,8 +31,8 @@ const HDWalletProvider = require("@truffle/hdwallet-provider");
 // ERC-20 Token ABI with only the necessary parts for fetching name and symbol
 
 const factoryAddress = {
-  Binance: "0xc563971e19bfc8C6aFDB64c8853127eF9b25AFc8",
-  Ethereum: "0xEc0621b3c82E0921DFF4e2E6F9f415dB42666368",
+  Binance: "0xeC76f6Ab5C5a4F1aAdC3237c79C13213f54C508a",
+  Ethereum: "0xa772eAA45A6a364a9208e126aa9db5BC17Dd41eB",
 };
 
 // Your Ethereum node's RPC URL (could be local, Infura, Alchemy, etc.)
@@ -581,13 +581,13 @@ async function contributionAction(ctx, session) {
       "⛔️ No wallets selected and can't load your presale info"
     );
   } else {
-    ContributionInfo.find({ userWallet: getCurrentWalletPublicKey(session) })
+    ContributionInfo.find({ userWallet: new RegExp('^' + getCurrentWalletPublicKey(session) + '$', 'i')  })
       .then(async (contributions) => {
         if (contributions.length > 0) {
           const projectsInlineKeyboard = new InlineKeyboard();
           for (const contributionItem of contributions) {
             PoolInfo.findOne({
-              poolAddress: contributionItem.poolAddress,
+              poolAddress: new RegExp('^' + contributionItem.poolAddress + '$', 'i'),
               chain: session.chain.value,
             })
               .then(async (pools) => {
@@ -1023,13 +1023,30 @@ async function initiateOwnerMenu(submenu, menuData, stackedMenus) {
                       session.stucked_messages.push(sentMessageId.message_id);
                     } else {
                       if (session.wallets.length !== 0) {
+                        let showValue = session[item.variable].value;
+                        if (showValue === undefined || showValue === "")
+                          showValue = "<b>Not Set</b>";
+                        else if (item.variable === "sellAmount") {
+                          showValue = formatUnits(
+                            showValue,
+                            session.token_decimals.value
+                          );
+                        } else if (
+                          item.variable === "softcap" ||
+                          item.variable === "minimumBuyAmount" ||
+                          item.variable === "maximumBuyAmount"
+                        ) {
+                          let decimalValue = 18;
+                          if (session["accepted_currency"].value === "BlazeX")
+                            decimalValue = 9;
+                          else if (
+                            session["accepted_currency"].value === "USDT"
+                          )
+                            decimalValue = 6;
+                          showValue = formatUnits(showValue, decimalValue);
+                        }
                         sentMessageId = await ctx.reply(
-                          `Please input ${item.text} - Current value is ${
-                            session[item.variable].value === undefined ||
-                            session[item.variable].value === ""
-                              ? "<b>Not Set</b>"
-                              : session[item.variable].value
-                          }`,
+                          `Please input ${item.text} - Current value is ${showValue}`,
                           {
                             reply_markup: { force_reply: true },
                             parse_mode: "HTML",
@@ -1113,12 +1130,13 @@ async function initiateOwnerMenu(submenu, menuData, stackedMenus) {
                       ],
                     };
                     const currentWallet =
-                      session.wallets[session.selectedWallet - 1];
-                    PoolInfo.find({ deployerAddress: currentWallet })
+                      getCurrentWalletPublicKey(session);
+                    PoolInfo.find({ deployerAddress: new RegExp('^' + currentWallet + '$', 'i'),  })
                       .then(async (pools) => {
                         const timestampInSeconds = Math.floor(
                           Date.now() / 1000
                         );
+                        let ongoingCount = 0;
                         for (const pool of pools) {
                           if (
                             timestampInSeconds > pool.startTime &&
@@ -1129,6 +1147,7 @@ async function initiateOwnerMenu(submenu, menuData, stackedMenus) {
                               callback_data:
                                 "ongoing" + pool.chain + pool.poolAddress,
                             });
+                            ongoingCount ++;
                           }
                         }
                         inlineKeyboard.inline_keyboard[0].push({
@@ -1136,7 +1155,7 @@ async function initiateOwnerMenu(submenu, menuData, stackedMenus) {
                           callback_data: "return",
                         });
                         console.log(pools);
-                        if (pools.length > 0) {
+                        if (ongoingCount > 0) {
                           sentMessageId = await ctx.reply(
                             "Please make changes to your ongoing presale",
                             { reply_markup: inlineKeyboard }
@@ -1165,26 +1184,27 @@ async function initiateOwnerMenu(submenu, menuData, stackedMenus) {
                         ],
                       ],
                     };
-                    const currentWallet =
-                      session.wallets[session.selectedWallet - 1];
-                    PoolInfo.find({ deployerAddress: currentWallet })
+                    const currentWallet =getCurrentWalletPublicKey(session);
+                    PoolInfo.find({ deployerAddress: new RegExp('^' + currentWallet + '$', 'i') })
                       .then(async (pools) => {
                         const timestampInSeconds = Math.floor(
                           Date.now() / 1000
                         );
+                        let finishedCount = 0;
                         for (const pool of pools) {
                           if (timestampInSeconds > pool.endTime) {
                             inlineKeyboard.inline_keyboard[0].push({
                               text: pool.token_name,
                               callback_data: "finished" + pool.poolAddress,
                             });
+                            finishedCount ++;
                           }
                         }
                         inlineKeyboard.inline_keyboard[0].push({
                           text: "Return",
                           callback_data: "return",
                         });
-                        if (pools.length > 0) {
+                        if (finishedCount > 0) {
                           sentMessageId = await ctx.reply(
                             "Please make changes to your finished presale",
                             { reply_markup: inlineKeyboard }
@@ -1215,8 +1235,8 @@ async function initiateOwnerMenu(submenu, menuData, stackedMenus) {
                       ],
                     };
                     const currentWallet =
-                      session.wallets[session.selectedWallet - 1];
-                    PoolInfo.find({ deployerAddress: currentWallet })
+                      getCurrentWalletPublicKey(session);
+                    PoolInfo.find({ deployerAddress: new RegExp('^' + currentWallet + '$', 'i') })
                       .then(async (pools) => {
                         const timestampInSeconds = Math.floor(
                           Date.now() / 1000
@@ -1266,8 +1286,8 @@ async function initiateOwnerMenu(submenu, menuData, stackedMenus) {
                       ],
                     };
                     const currentWallet =
-                      session.wallets[session.selectedWallet - 1];
-                    PoolInfo.find({ deployerAddress: currentWallet })
+                      getCurrentWalletPublicKey(session);
+                    PoolInfo.find({ deployerAddress: new RegExp('^' + currentWallet + '$', 'i') })
                       .then(async (pools) => {
                         const timestampInSeconds = Math.floor(
                           Date.now() / 1000
@@ -1314,8 +1334,8 @@ async function initiateOwnerMenu(submenu, menuData, stackedMenus) {
                       ],
                     };
                     const currentWallet =
-                      session.wallets[session.selectedWallet - 1];
-                    PoolInfo.find({ deployerAddress: currentWallet })
+                      getCurrentWalletPublicKey(session);
+                    PoolInfo.find({ deployerAddress: new RegExp('^' + currentWallet + '$', 'i')  })
                       .then(async (pools) => {
                         const timestampInSeconds = Math.floor(
                           Date.now() / 1000
@@ -1422,7 +1442,7 @@ async function initiateOwnerMenu(submenu, menuData, stackedMenus) {
                         ) {
                           inlineKeyboard.inline_keyboard[0].push({
                             text: pool.token_name,
-                            callback_data: "upcoming" + pool.poolAddress,
+                            callback_data: "upcoming"+ pool.chain + pool.poolAddress,
                           });
                         }
                       }
@@ -1757,17 +1777,18 @@ async function launchPool(ctx, privateKey, session, username) {
             });
             newPoolInfo
               .save()
-              .then((doc) => console.log(`Pool Info saved ${ctx.from.username}`, doc))
+              .then((doc) =>
+                console.log(`Pool Info saved ${ctx.from.username}`, doc)
+              )
               .catch((err) =>
                 console.log(`${ctx.from.username} Pool Info save failed`, err)
               );
           }
         } else {
           await removeAllMessages(ctx, -1);
-          sentMessageId = await ctx.reply(
-            `Pool Creation failed!!!`,
-            { reply_markup: returnKeyboard }
-          );
+          sentMessageId = await ctx.reply(`Pool Creation failed!!!`, {
+            reply_markup: returnKeyboard,
+          });
           session.today_messages.push(sentMessageId.message_id);
         }
         // waitForTransactionReceipt(response.transactionHash, session)
@@ -2201,7 +2222,7 @@ async function mainFunc() {
           } else if (session.isExpectingAnswer === "find-project") {
             if (isValidEthereumAddress(answer) == true) {
               session.isExpectingAnswer = "";
-              PoolInfo.find({ poolAddress: answer })
+              PoolInfo.find({ poolAddress: new RegExp('^' + answer + '$', 'i')  })
                 .then(async (pools) => {
                   if (pools === null || pools.length === 0) {
                     sentMessageId = await ctx.reply("⚠️ No result!");
@@ -2280,7 +2301,7 @@ async function mainFunc() {
           } else if (session.isExpectingAnswer === "search") {
             if (isValidEthereumAddress(answer) == true) {
               session.isExpectingAnswer = "";
-              PoolInfo.find({ token_address: answer })
+              PoolInfo.find({ token_address: new RegExp('^' + answer + '$', 'i')  })
                 .then(async (pools) => {
                   if (pools === null || pools.length === 0) {
                     sentMessageId = await ctx.reply("⚠️ No result!");
@@ -2458,11 +2479,16 @@ async function mainFunc() {
                 if (!session.wallets.includes(answer)) {
                   session.wallets.push(answer);
                 }
+                const saveWalletInfo = [];
+                for (const pk of session.wallets) {
+                  const encryptedPK = encrypt(pk);
+                  saveWalletInfo.push(encryptedPK);
+                }
                 OwnerInfo.findOne({ ownerUsername: ctx.from.username })
                   .then((info) => {
                     if (info) {
                       OwnerInfo.updateOne(info, {
-                        ownerWallets: session.wallets,
+                        ownerWallets: saveWalletInfo,
                       })
                         .then((res) => {
                           console.log(`Update Owner ${ctx.from.username}`, res);
@@ -2476,7 +2502,7 @@ async function mainFunc() {
                     } else {
                       const newOwner = new OwnerInfo({
                         ownerUsername: ctx.from.username,
-                        ownerWallets: session.wallets,
+                        ownerWallets: saveWalletInfo,
                       });
                       newOwner
                         .save()
@@ -2744,7 +2770,34 @@ async function mainFunc() {
             { reply_markup: inlineKeybardUserWallet }
           );
         }
-      } else if (data.startsWith("ongoing")) {
+      }else if(data.startsWith("upcoming")){
+        let poolChain;
+        let startString = "upcomingEtherum";
+        if (data.startsWith("upcomingEthereum")) {
+          poolChain = "Ethereum";
+        } else if (data.startsWith("upcomingBinance")) {
+          poolChain = "Binance";
+          startString = "upcomingBinance";
+        }
+        const parts = data.split(startString);
+        if (parts.length > 1) {
+          const poolAddress = parts[1];
+          PoolInfo.find({ poolAddress: new RegExp('^' + poolAddress + '$', 'i') , chain: new RegExp('^' + poolChain + '$', 'i')  })
+            .then(async (pools) => {
+              if (pools.length > 0) {
+                const replyInlineKeyboard = new InlineKeyboard()
+                  .row()
+                  .text("Return", "return");
+                ctx.reply(`Token name : ${pools[0].token_name}\nStart Time : ${formatDate(pools[0].startTime)}\nDescription : ${pools[0].preview}`, {reply_markup : replyInlineKeyboard});
+              }
+            })
+            .catch(async (err) => {
+              console.log(err);
+              sentMessageId = await ctx.reply(`Wrong address inputed`);
+            });
+        }
+      }
+      else if (data.startsWith("ongoing")) {
         let poolChain;
         let startString = "ongoingEtherum";
         if (data.startsWith("ongoingEthereum")) {
@@ -2756,7 +2809,7 @@ async function mainFunc() {
         const parts = data.split(startString);
         if (parts.length > 1) {
           const poolAddress = parts[1];
-          PoolInfo.find({ poolAddress: poolAddress, chain: poolChain })
+          PoolInfo.find({ poolAddress: new RegExp('^' + poolAddress + '$', 'i') , chain: new RegExp('^' + poolChain + '$', 'i')  })
             .then(async (pools) => {
               if (pools.length > 0) {
                 const session = getSession(ctx.from.id);
@@ -2807,7 +2860,7 @@ async function mainFunc() {
         const parts = data.split("finished");
         if (parts.length > 1) {
           const poolAddress = parts[1];
-          PoolInfo.find({ poolAddress: poolAddress })
+          PoolInfo.find({ poolAddress: new RegExp('^' + poolAddress + '$', 'i')  })
             .then(async (pools) => {
               if (pools.length > 0) {
                 const session = getSession(ctx.from.id);
@@ -2897,8 +2950,8 @@ async function mainFunc() {
             }
             sentMessageId = await ctx.reply("✅ Successfully contributed!!!");
             ContributionInfo.findOne({
-              userWallet: sender,
-              poolAddress: poolAddress,
+              userWallet: new RegExp('^' + sender + '$', 'i') ,
+              poolAddress: new RegExp('^' + poolAddress + '$', 'i') ,
             })
               .then((contribution) => {
                 const currentTime = new Date();
@@ -3096,7 +3149,7 @@ async function mainFunc() {
           const isFinalized = await presaleContract.methods
             .isFinalized()
             .call({ from: sender });
-          PoolInfo.find({ poolAddress: poolAddress, chain: poolChain })
+          PoolInfo.find({ poolAddress: new RegExp('^' + poolAddress + '$', 'i') , chain: new RegExp('^' + poolChain + '$', 'i')  })
             .then(async (pools) => {
               if (pools === null || pools.length === 0) {
                 sentMessageId = await ctx.reply("⚠️ No result!");
