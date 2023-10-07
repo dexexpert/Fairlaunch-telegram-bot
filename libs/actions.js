@@ -20,6 +20,12 @@ function formatDate(date1) {
 
   return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
 }
+function parseSoftCap(softcap, accepted_currency) {
+  let decimalValue = 18;
+  if (accepted_currency === "BlazeX") decimalValue = 9;
+  else if (accepted_currency === "USDT") decimalValue = 6;
+  return formatUnits(softcap, decimalValue);
+}
 async function fetchCurrentGwei() {
   try {
     const response = await fetch(GAS_PRICE_API_URL);
@@ -163,9 +169,10 @@ async function getPresaleInformation(presale_address, token_address, session) {
     const tokenAddress = await presaleContract.methods.tokenAddress().call({ from: sender });
 
     const tokenContract = new web3.eth.Contract(tokenAbi, tokenAddress);
-    const symbol = tokenContract.methods.symbol().call({ from: sender });
-    const name = tokenContract.methods.symbol().call({ from: sender });
-    const supply = tokenContract.methods.totalSupply().call({ from: sender });
+    const symbol = await tokenContract.methods.symbol().call({ from: sender });
+    const name = await tokenContract.methods.symbol().call({ from: sender });
+    const supply = await tokenContract.methods.totalSupply().call({ from: sender });
+    const decimals = await tokenContract.methods.decimals().call({from:sender});
 
     const sellAmount = await presaleContract.methods.sellAmount().call({ from: sender });
     console.log("sellAmount", sellAmount);
@@ -175,11 +182,13 @@ async function getPresaleInformation(presale_address, token_address, session) {
     console.log("totalRaises", totalRaises);
     const totalContributors = await presaleContract.methods.totalContributor().call({ from: sender });
     console.log("totalContributors", totalContributors);
-    const liquidityRatio = await presaleContract.methods.calcCurrentRate().call({ from: sender });
+    const liquidityRatio = await presaleContract.methods.liquidityPercentage().call({ from: sender });
     console.log("liquidityRatio", liquidityRatio);
-    const marketCap = await presaleContract.methods.calcInitialMarketCapInToken().call({ from: sender });
+    const lockupDays = await presaleContract.methods.lockupDates().call({from : sender});
+    console.log("lockup days", lockupDays);
+    const marketCap = await presaleContract.methods.calcInitialMarketCapInToken('1').call({ from: sender });
     console.log("marketCap", marketCap);
-    const userRes = await presaleContract.methods.user(sender).call({ from: sender });
+    const userRes = await presaleContract.methods.users(sender).call({ from: sender });
     console.log("userRes", userRes);
     const minimumBuyAmount = await presaleContract.methods.minimumBuyAmount().call({ from: sender });
     console.log("minimumBuyAmount", minimumBuyAmount);
@@ -192,11 +201,12 @@ async function getPresaleInformation(presale_address, token_address, session) {
     const maxContributionAmount = await presaleContract.methods.maxContributionAmount().call({ from: sender });
     console.log("maxContributionAmount", maxContributionAmount);
     const isFinalized = await presaleContract.methods.isFinalized().call({ from: sender });
-    console.log("isFinalized", isFinalized);s
+    console.log("isFinalized", isFinalized);
     return {
       tokenAddress,
       name,
       symbol,
+      decimals,
       supply,
       sellAmount,
       softCap,
@@ -218,9 +228,9 @@ async function getPresaleInformation(presale_address, token_address, session) {
 }
 
 async function showInformationAboutProjectOwner(poolData, ctx, tokenInfomationResult, session, replyInlineKeyboard) {
-  const outPutText = `<b>Project Information</b>\n  ----name: <b>${tokenInfomationResult.name}</b>\n  ----symbol: <b>${tokenInfomationResult.symbol}</b>\n  ----supply: <b>${tokenInfomationResult.supply}</b>\n${poolData.websiteURL ? '  ----website: <b>' + poolData.websiteURL + '</b>\n' : ''}${poolData.twitterURL ? '  ----twitter: <b>' + poolData.twitterURL + '</b>\n' : ''}${poolData.telegramURL ? '  ----telegram: <b>' + poolData.telegramURL + '</b>\n' : ''}${poolData.facebookURL ? '  ----facebook: <b>' + poolData.facebookURL + '</b>\n' : ''}${poolData.discordURL ? '  ----discord: <b>' + poolData.discordURL + '</b>\n' : ''}${poolData.githubURL ? '  ----github: <b>' + poolData.githubURL + '</b>\n' : ''}${poolData.instagramURL ? '  ----instagram: <b>' + poolData.instagramURL + '</b>\n' : ''}${poolData.redditURL ? '  ----reddit: <b>' + poolData.redditURL + '</b>\n' : ''}<b>Financial Metrics</b>\n  ----Funds Raised: <b>${tokenInfomationResult.totalRaises}${poolData.accepted_currency}</b>\n  ----Currency Used: <b>${tokenInfomationResult.accepted_currency}</b>\n<b>Presale Progress & Metrics</b>\n  ----Tokens Supplied: <b>${tokenInfomationResult.sellAmount}</b>\n  ----Softcap: <b>${tokenInfomationResult.softCap}</b>\n  ----Minimum Buy Amount: <b>${tokenInfomationResult.minimumBuyAmount ? tokenInfomationResult.minimumBuyAmount + poolData.accepted_currency : 'Not set'}</b>\n  ----Maximum Buy Amount: <b>${tokenInfomationResult.maximumBuyAmount ? tokenInfomationResult.maximumBuyAmount + poolData.maximumBuyAmount : 'Not Set'}</b>\n<b>Timeline & Status</b>\n  ----Launch Start Time: <b>${formatDate(tokenInfomationResult.startTime)}</b>\n  ----Launch End Time: <b>${formateDate(tokenInfomationResult.endTime)}</b>\n<b>Investors Insight</b>\n  ----Total Participants: <b>${tokenInfomationResult.totalContributors}</b>\n  ----Biggest Contribution: <b>${tokenInfomationResult.maxContributionAmount}${poolData.accepted_currency}</b>\n  ----Average Contribution: <b>${Number(tokenInfomationResult.totalDepositAmount / tokenInfomationResult.totalContributors).toFixed(4)}${poolData.accepted_currency}</b>\n<b>Post Launch Information</b>\n  ----Router For Listing: <b>${poolData.router}</b>\n  ----Liquidity Percentage: <b>${poolData.liquidityPercentage}%</b>\n`
+  const outPutText = `Token Details Menu:\n🔸 🌐 Project Name: <b>${tokenInfomationResult.name}</b>\n\n🔹 🔖 Token Information\n🆔Symbol: <b>${tokenInfomationResult.symbol}</b>\n📊 Decimals:<b>{tokenInformationResult.decimals}</b>\n📝 Description:${poolData.description}\n\n🔹 💰 Financial Details\n💸 Raised: <b>${parseSoftCap(tokenInfomationResult.totalRaises, poolData.accepted_currency)}${poolData.accepted_currency}</b>\n🏦 Soft Cap: <b>${parseSoftCap(tokenInfomationResult.softCap, poolData.accepted_currency)} ${poolData.accepted_currency}</b>\n🪙 Tokens for Presale: <b>${formatUnits(tokenInfomationResult.sellAmount, Number(tokenInfomationResult.decimals))}</b>\n🌊 Liquidity %:<b>${tokenInfomationResult.liquidityRatio}</b>\n🔒 Liquidity Lock Time: <b>${tokenInfomationResult.lockupDates} days</b>\n🛒 Listing Platform: <b>${poolData.router}</b>\n\n🔹 🛍 Sale & Contribution Details\n⏰ Presale Start Time: <b>${formatDate(tokenInfomationResult.startTime)}</b>\n⏳ Presale End Time: <b>${formatDate(tokenInfomationResult.endTime)}</b>\n🚫 Max Contribution: <b>${parseSoftCap(tokenInfomationResult.maxContributionAmount, poolData.accepted_currency)} ${poolData.accepted_currency}</b>\n👥 Total Contributors: <b>${tokenInfomationResult.totalContributors}</b>\n🎟 Your Purchase: <b>${tokenInfomationResult.contributionAmount}</b>\n\n🔹 🌐 Web & Social Links\n🌍 Official Website: ${poolData.websiteURL ? '  ----website: <b>' + poolData.websiteURL + '</b>\n' : ''}\n🐦 Twitter: ${poolData.twitterURL ? '  ----twitter: <b>' + poolData.twitterURL + '</b>\n' : ''}📡 Telegram: ${poolData.telegramURL ? '  ----telegram: <b>' + poolData.telegramURL + '</b>\n' : ''}📘 Facebook: ${poolData.facebookURL ? '  ----facebook: <b>' + poolData.facebookURL + '</b>\n' : ''}🎮 Discord: ${poolData.discordURL ? '  ----discord: <b>' + poolData.discordURL + '</b>\n' : ''}`
   const sentMessageId = ctx.reply(outPutText, { parse_mode: 'HTML', reply_markup: replyInlineKeyboard });
   return sentMessageId;
 }
 
-module.exports = { replyReviewLaunch, getPresaleInformation, replyReviewMessage };
+module.exports = { replyReviewLaunch, getPresaleInformation, replyReviewMessage, showInformationAboutProjectOwner };

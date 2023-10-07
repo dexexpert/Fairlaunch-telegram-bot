@@ -25,14 +25,15 @@ const {
   replyReviewLaunch,
   getPresaleInformation,
   replyReviewMessage,
+  showInformationAboutProjectOwner,
 } = require("./libs/actions");
 const getTotalBalance = require("./libs/walletFuncs");
 const HDWalletProvider = require("@truffle/hdwallet-provider");
 // ERC-20 Token ABI with only the necessary parts for fetching name and symbol
 
 const factoryAddress = {
-  Binance: "0xeC76f6Ab5C5a4F1aAdC3237c79C13213f54C508a",
-  Ethereum: "0xa772eAA45A6a364a9208e126aa9db5BC17Dd41eB",
+  Binance: "0x8AB7CFc7a966Ba2A83A83B750C2c1c7f3768Aa39",
+  Ethereum: "0x21742CE2a230CCBdea505b4ecEC540826D171573",
 };
 
 // Your Ethereum node's RPC URL (could be local, Infura, Alchemy, etc.)
@@ -44,6 +45,7 @@ const providerURL = {
 const { Bot, InlineKeyboard } = require("grammy");
 const { Menu } = require("@grammyjs/menu");
 const mongoose = require("mongoose");
+const { parse } = require("dotenv");
 const mongoUri =
   "mongodb+srv://kham:eWgvFVyLVMknCK2@cluster0.0kwh7.mongodb.net/";
 
@@ -134,6 +136,13 @@ function formatDate(date1) {
   const seconds = String(date.getSeconds()).padStart(2, "0");
 
   return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
+}
+
+function parseSoftCap(softcap, accepted_currency) {
+  let decimalValue = 18;
+  if (accepted_currency === "BlazeX") decimalValue = 9;
+  else if (accepted_currency === "USDT") decimalValue = 6;
+  return formatUnits(softcap, decimalValue);
 }
 
 function getSession(userId) {
@@ -581,13 +590,22 @@ async function contributionAction(ctx, session) {
       "⛔️ No wallets selected and can't load your presale info"
     );
   } else {
-    ContributionInfo.find({ userWallet: new RegExp('^' + getCurrentWalletPublicKey(session) + '$', 'i')  })
+    ContributionInfo.find({
+      userWallet: new RegExp(
+        "^" + getCurrentWalletPublicKey(session) + "$",
+        "i"
+      ),
+    })
       .then(async (contributions) => {
         if (contributions.length > 0) {
           const projectsInlineKeyboard = new InlineKeyboard();
           for (const contributionItem of contributions) {
-            PoolInfo.findOne({
-              poolAddress: new RegExp('^' + contributionItem.poolAddress + '$', 'i'),
+            console.log("contributionItem", contributionItem);
+            await PoolInfo.findOne({
+              poolAddress: new RegExp(
+                "^" + contributionItem.poolAddress + "$",
+                "i"
+              ),
               chain: session.chain.value,
             })
               .then(async (pools) => {
@@ -610,11 +628,12 @@ async function contributionAction(ctx, session) {
                   const sender = accounts[0];
                   const presaleContract = new web3.eth.Contract(
                     fairlaunchAbi,
-                    poolAddress
+                    contributionItem.poolAddress
                   );
                   const isFinalized = await presaleContract.methods
                     .isFinalized()
                     .call({ from: sender });
+                  console.log(isFinalized, "isFinalized");
                   projectsInlineKeyboard.text(
                     `${pools.token_name} - ${pools.accepted_currency} ${
                       isFinalized === true ? "✅ You can claim" : ""
@@ -627,9 +646,10 @@ async function contributionAction(ctx, session) {
                 console.log(err);
               });
           }
-          sentMessageId = await ctx.reply(`Your contributed pools are her`, {
+          sentMessageId = await ctx.reply(`Your contributed pools are here`, {
             reply_markup: projectsInlineKeyboard,
           });
+          session.today_messages.push(sentMessageId.message_id);
         } else {
           sentMessageId = await ctx.reply(
             "⚠️ You have no contributed presales"
@@ -659,6 +679,8 @@ const cancelInlineKeyboard = new InlineKeyboard().text(
   "cancel",
   "click-cancel-input"
 );
+
+const returnKeyboard = new InlineKeyboard().text("Return", "return");
 
 async function ownerMenuMiddleware(ctx, next) {
   try {
@@ -1129,9 +1151,13 @@ async function initiateOwnerMenu(submenu, menuData, stackedMenus) {
                         ],
                       ],
                     };
-                    const currentWallet =
-                      getCurrentWalletPublicKey(session);
-                    PoolInfo.find({ deployerAddress: new RegExp('^' + currentWallet + '$', 'i'),  })
+                    const currentWallet = getCurrentWalletPublicKey(session);
+                    PoolInfo.find({
+                      deployerAddress: new RegExp(
+                        "^" + currentWallet + "$",
+                        "i"
+                      ),
+                    })
                       .then(async (pools) => {
                         const timestampInSeconds = Math.floor(
                           Date.now() / 1000
@@ -1142,18 +1168,22 @@ async function initiateOwnerMenu(submenu, menuData, stackedMenus) {
                             timestampInSeconds > pool.startTime &&
                             timestampInSeconds < pool.endTime
                           ) {
-                            inlineKeyboard.inline_keyboard[0].push({
-                              text: pool.token_name,
-                              callback_data:
-                                "ongoing" + pool.chain + pool.poolAddress,
-                            });
-                            ongoingCount ++;
+                            inlineKeyboard.inline_keyboard.push([
+                              {
+                                text: pool.token_name,
+                                callback_data:
+                                  "ongoing" + pool.chain + pool.poolAddress,
+                              },
+                            ]);
+                            ongoingCount++;
                           }
                         }
-                        inlineKeyboard.inline_keyboard[0].push({
-                          text: "Return",
-                          callback_data: "return",
-                        });
+                        inlineKeyboard.inline_keyboard.push([
+                          {
+                            text: "Return",
+                            callback_data: "return",
+                          },
+                        ]);
                         console.log(pools);
                         if (ongoingCount > 0) {
                           sentMessageId = await ctx.reply(
@@ -1184,8 +1214,13 @@ async function initiateOwnerMenu(submenu, menuData, stackedMenus) {
                         ],
                       ],
                     };
-                    const currentWallet =getCurrentWalletPublicKey(session);
-                    PoolInfo.find({ deployerAddress: new RegExp('^' + currentWallet + '$', 'i') })
+                    const currentWallet = getCurrentWalletPublicKey(session);
+                    PoolInfo.find({
+                      deployerAddress: new RegExp(
+                        "^" + currentWallet + "$",
+                        "i"
+                      ),
+                    })
                       .then(async (pools) => {
                         const timestampInSeconds = Math.floor(
                           Date.now() / 1000
@@ -1193,17 +1228,21 @@ async function initiateOwnerMenu(submenu, menuData, stackedMenus) {
                         let finishedCount = 0;
                         for (const pool of pools) {
                           if (timestampInSeconds > pool.endTime) {
-                            inlineKeyboard.inline_keyboard[0].push({
-                              text: pool.token_name,
-                              callback_data: "finished" + pool.poolAddress,
-                            });
-                            finishedCount ++;
+                            inlineKeyboard.inline_keyboard.push([
+                              {
+                                text: pool.token_name,
+                                callback_data: "finished" + pool.poolAddress,
+                              },
+                            ]);
+                            finishedCount++;
                           }
                         }
-                        inlineKeyboard.inline_keyboard[0].push({
-                          text: "Return",
-                          callback_data: "return",
-                        });
+                        inlineKeyboard.inline_keyboard.push([
+                          {
+                            text: "Return",
+                            callback_data: "return",
+                          },
+                        ]);
                         if (finishedCount > 0) {
                           sentMessageId = await ctx.reply(
                             "Please make changes to your finished presale",
@@ -1234,32 +1273,43 @@ async function initiateOwnerMenu(submenu, menuData, stackedMenus) {
                         ],
                       ],
                     };
-                    const currentWallet =
-                      getCurrentWalletPublicKey(session);
-                    PoolInfo.find({ deployerAddress: new RegExp('^' + currentWallet + '$', 'i') })
+                    const currentWallet = getCurrentWalletPublicKey(session);
+                    let claimSettingsCount = 0;
+                    PoolInfo.find({
+                      deployerAddress: new RegExp(
+                        "^" + currentWallet + "$",
+                        "i"
+                      ),
+                    })
                       .then(async (pools) => {
                         const timestampInSeconds = Math.floor(
                           Date.now() / 1000
                         );
                         for (const pool of pools) {
                           if (timestampInSeconds < pool.endTime) {
-                            inlineKeyboard.inline_keyboard[0].push({
-                              text: pool.token_name,
-                              callback_data: "claim" + pool.poolAddress,
-                            });
+                            inlineKeyboard.inline_keyboard.push([
+                              {
+                                text: pool.token_name,
+                                callback_data: "claim" +pool.chain+ pool.poolAddress,
+                              },
+                            ]);
+                            claimSettingsCount++;
                           }
                         }
-                        inlineKeyboard.inline_keyboard[0].push({
-                          text: "Return",
-                          callback_data: "return",
-                        });
-                        if (pools.length > 0) {
+                        inlineKeyboard.inline_keyboard.push([
+                          {
+                            text: "Return",
+                            callback_data: "return",
+                          },
+                        ]);
+                        if (claimSettingsCount > 0) {
                           sentMessageId = await ctx.reply(
                             "Please make changes to claim settings",
                             {
                               reply_markup: inlineKeyboard,
                             }
                           );
+                          session.today_messages.push(sentMessageId.message_id);
                         } else {
                           sentMessageId = await ctx.reply(
                             "⚠️ No presales to edit claim settings"
@@ -1285,30 +1335,41 @@ async function initiateOwnerMenu(submenu, menuData, stackedMenus) {
                         ],
                       ],
                     };
-                    const currentWallet =
-                      getCurrentWalletPublicKey(session);
-                    PoolInfo.find({ deployerAddress: new RegExp('^' + currentWallet + '$', 'i') })
+                    const currentWallet = getCurrentWalletPublicKey(session);
+                    let refundMenuCount = 0;
+                    PoolInfo.find({
+                      deployerAddress: new RegExp(
+                        "^" + currentWallet + "$",
+                        "i"
+                      ),
+                    })
                       .then(async (pools) => {
                         const timestampInSeconds = Math.floor(
                           Date.now() / 1000
                         );
                         for (const pool of pools) {
                           if (timestampInSeconds > pool.endTime) {
-                            inlineKeyboard.inline_keyboard[0].push({
-                              text: pool.token_name,
-                              callback_data: "refund" + pool.poolAddress,
-                            });
+                            inlineKeyboard.inline_keyboard.push([
+                              {
+                                text: pool.token_name,
+                                callback_data: "refund_" +pool.chain+ pool.poolAddress,
+                              },
+                            ]);
+                            refundMenuCount++;
                           }
                         }
-                        inlineKeyboard.inline_keyboard[0].push({
-                          text: "Return",
-                          callback_data: "return",
-                        });
-                        if (pools.length > 0) {
+                        inlineKeyboard.inline_keyboard.push([
+                          {
+                            text: "Return",
+                            callback_data: "return",
+                          },
+                        ]);
+                        if (refundMenuCount > 0) {
                           sentMessageId = await ctx.reply(
                             "Please make changes to your finished presale",
                             { reply_markup: inlineKeyboard }
                           );
+                          session.today_messages.push(sentMessageId.message_id);
                         } else {
                           sentMessageId = await ctx.reply(
                             "⚠️ No finished presale to refund at the moment"
@@ -1333,36 +1394,48 @@ async function initiateOwnerMenu(submenu, menuData, stackedMenus) {
                         ],
                       ],
                     };
-                    const currentWallet =
-                      getCurrentWalletPublicKey(session);
-                    PoolInfo.find({ deployerAddress: new RegExp('^' + currentWallet + '$', 'i')  })
+                    let finalizeCount = 0;
+                    const currentWallet = getCurrentWalletPublicKey(session);
+                    PoolInfo.find({
+                      deployerAddress: new RegExp(
+                        "^" + currentWallet + "$",
+                        "i"
+                      ),
+                    })
                       .then(async (pools) => {
                         const timestampInSeconds = Math.floor(
                           Date.now() / 1000
                         );
                         for (const pool of pools) {
                           if (timestampInSeconds > pool.endTime) {
-                            inlineKeyboard.inline_keyboard[0].push({
-                              text: pool.token_name,
-                              callback_data: "finalize" + pool.poolAddress,
-                            });
+                            inlineKeyboard.inline_keyboard.push([
+                              {
+                                text: pool.token_name,
+                                callback_data: "finalizeAddLP_" + pool.chain+ pool.poolAddress,
+                              },
+                            ]);
+                            finalizeCount++;
                           }
                         }
-                        inlineKeyboard.inline_keyboard[0].push({
-                          text: "Return",
-                          callback_data: "return",
-                        });
-                        if (pools.length > 0) {
+                        inlineKeyboard.inline_keyboard.push([
+                          {
+                            text: "Return",
+                            callback_data: "return",
+                          },
+                        ]);
+                        if (finalizeCount > 0) {
                           sentMessageId = await ctx.reply(
                             "Please finalize your finished presale",
                             {
                               reply_markup: inlineKeyboard,
                             }
                           );
+                          session.today_messages.push(sentMessageId.message_id);
                         } else {
                           sentMessageId = await ctx.reply(
                             "⚠️ No finished presale to finalize at the moment"
                           );
+                          session.today_messages.push(sentMessageId.message_id);
                         }
                       })
                       .catch((err) => console.log(err));
@@ -1388,6 +1461,7 @@ async function initiateOwnerMenu(submenu, menuData, stackedMenus) {
                       ],
                     ],
                   };
+                  let liveCount = 0;
                   PoolInfo.find({})
                     .then(async (pools) => {
                       const timestampInSeconds = Math.floor(Date.now() / 1000);
@@ -1396,18 +1470,24 @@ async function initiateOwnerMenu(submenu, menuData, stackedMenus) {
                           timestampInSeconds > pool.startTime &&
                           timestampInSeconds < pool.endTime
                         ) {
-                          inlineKeyboard.inline_keyboard[0].push({
-                            text: pool.token_name,
-                            callback_data: "live" + pool.poolAddress,
-                          });
+                          inlineKeyboard.inline_keyboard.push([
+                            {
+                              text: pool.token_name,
+                              callback_data:
+                                "live" + pool.chain + pool.poolAddress,
+                            },
+                          ]);
+                          liveCount++;
                         }
                       }
-                      inlineKeyboard.inline_keyboard[0].push({
-                        text: "Return",
-                        callback_data: "return",
-                      });
+                      inlineKeyboard.inline_keyboard.push([
+                        {
+                          text: "Return",
+                          callback_data: "return",
+                        },
+                      ]);
                       console.log(pools);
-                      if (pools.length > 0) {
+                      if (liveCount > 0) {
                         sentMessageId = await ctx.reply(
                           "All live presales : ",
                           {
@@ -1431,6 +1511,7 @@ async function initiateOwnerMenu(submenu, menuData, stackedMenus) {
                       ],
                     ],
                   };
+                  let upcomingCount = 0;
                   PoolInfo.find({})
                     .then(async (pools) => {
                       const timestampInSeconds = Math.floor(Date.now() / 1000);
@@ -1440,18 +1521,24 @@ async function initiateOwnerMenu(submenu, menuData, stackedMenus) {
                           timestampInSeconds < pool.startTime &&
                           timestampInSeconds < pool.endTime
                         ) {
-                          inlineKeyboard.inline_keyboard[0].push({
-                            text: pool.token_name,
-                            callback_data: "upcoming"+ pool.chain + pool.poolAddress,
-                          });
+                          inlineKeyboard.inline_keyboard.push([
+                            {
+                              text: pool.token_name,
+                              callback_data:
+                                "upcoming" + pool.chain + pool.poolAddress,
+                            },
+                          ]);
+                          upcomingCount++;
                         }
                       }
-                      inlineKeyboard.inline_keyboard[0].push({
-                        text: "Return",
-                        callback_data: "return",
-                      });
+                      inlineKeyboard.inline_keyboard.push([
+                        {
+                          text: "Return",
+                          callback_data: "return",
+                        },
+                      ]);
                       console.log(pools);
-                      if (pools.length > 0) {
+                      if (upcomingCount > 0) {
                         sentMessageId = await ctx.reply(
                           "All upcoming presales : ",
                           {
@@ -1721,7 +1808,6 @@ async function launchPool(ctx, privateKey, session, username) {
           // Extracting the values
           poolAddress = event.returnValues.poolAddress;
           const deployerAddress = event.returnValues.deployerAddress;
-          const returnKeyboard = new InlineKeyboard().text("Return", "return");
           await removeAllMessages(ctx, -1);
           sentMessageId = await ctx.reply(
             `Launched successfully!!! address is ${poolAddress}`,
@@ -1896,7 +1982,6 @@ async function launchPool(ctx, privateKey, session, username) {
       } catch (err) {
         console.log(err);
 
-        const returnKeyboard = new InlineKeyboard().text("Return", "return");
         await removeAllMessages(ctx, -1);
         sentMessageId = await ctx.reply("Failed creating fairlaunch", {
           reply_markup: returnKeyboard,
@@ -1907,7 +1992,6 @@ async function launchPool(ctx, privateKey, session, username) {
     return "";
   } catch (err) {
     console.log(err);
-    const returnKeyboard = new InlineKeyboard().text("Return", "return");
     await removeAllMessages(ctx, -1);
     sentMessageId = await ctx.reply("Failed creating fairlaunch", {
       reply_markup: returnKeyboard,
@@ -1930,8 +2014,10 @@ async function cancelAndRefundFunc(PK, poolAddress, chain) {
   const presaleContract = new web3.eth.Contract(fairlaunchAbi, poolAddress);
   try {
     await presaleContract.methods.cancelAndRefund().send({ from: sender });
+    return true;
   } catch (err) {
     console.log(err);
+    return false;
   }
 }
 
@@ -1948,8 +2034,10 @@ async function finalizeAndAddLPFunc(PK, poolAddress, chain) {
   const presaleContract = new web3.eth.Contract(fairlaunchAbi, poolAddress);
   try {
     await presaleContract.methods.finalize().send({ from: sender });
+    return true;
   } catch (err) {
     console.log(err);
+    return false;
   }
 }
 
@@ -2222,7 +2310,9 @@ async function mainFunc() {
           } else if (session.isExpectingAnswer === "find-project") {
             if (isValidEthereumAddress(answer) == true) {
               session.isExpectingAnswer = "";
-              PoolInfo.find({ poolAddress: new RegExp('^' + answer + '$', 'i')  })
+              PoolInfo.find({
+                poolAddress: new RegExp("^" + answer + "$", "i"),
+              })
                 .then(async (pools) => {
                   if (pools === null || pools.length === 0) {
                     sentMessageId = await ctx.reply("⚠️ No result!");
@@ -2236,55 +2326,52 @@ async function mainFunc() {
                           ],
                         ],
                       };
-                      const tokenInfomationResult = getPresaleInformation(
-                        pool.poolAddress,
-                        pool.token_address,
-                        session
-                      );
-                      const returnText = `Overview of Token\n
-                    <b>Project Description</b>: ${pool.description}\n
-                    <b>Token Metrics</b>: ${pool.token_name} ${
+                      const tokenInformationResult =
+                        await getPresaleInformation(
+                          pool.poolAddress,
+                          pool.token_address,
+                          session
+                        );
+                      const returnText = `Overview of Token\n<b>Project Description</b>: ${pool.description}\n<b>Token Metrics</b>: ${pool.token_name} ${
                         pool.token_symbol
-                      }\n
-                    <b>Presale Goals</b>: ${pool.softcap}${
+                      }\n<b>Presale Goals</b>: ${parseSoftCap(pool.softcap, pool.accepted_currency)}${
                         pool.accepted_currency
-                      }\n
-                    <b>Presale Stats</b>: ${
-                      tokenInformation.totalDepositAmount
-                    }${pool.accepted_currency} raised, ${
-                        tokenInformation.totalContributors
-                      } contributors\n
-                    <b>Post Presale Actions</b>: ${pool.router}\n
-                    <b>Links Media</b>: ${pool.websiteURL}\n
-                    <b>Presale Time</b>: ${formatDate(
+                      }\n<b>Presale Stats</b>: ${
+                      parseSoftCap(tokenInformationResult.totalRaises, pool.accepted_currency)
+                    } ${pool.accepted_currency} raised, ${
+                        tokenInformationResult.totalContributors
+                      } contributors\n<b>Post Presale Actions</b>: ${pool.router}\n<b>Links Media</b>: ${pool.websiteURL}\n<b>Presale Time</b>: ${formatDate(
                       pool.startTime
-                    )} - ${formatDate(pool.endTime)}\n
-                    <b>Current Marketcap</b>: ${pool.marketCap}\n
-                    <b>Your contributions</b>":  ${
-                      tokenInfomationResult.contributionAmount
-                    }\n`;
+                    )} - ${formatDate(pool.endTime)}\n<b>Current Marketcap</b>: ${pool.marketCap}\n<b>Your contributions</b>:  ${
+                      parseSoftCap(tokenInformationResult.contributionAmount, pool.accepted_currency)
+                    } ${pool.accepted_currency}\n`;
 
                       inlineKeyboards.inline_keyboard[0].push({
                         text: "Back To Browse Projects",
-                        callback_data: "",
+                        callback_data: "back",
                       });
                       inlineKeyboards.inline_keyboard[0].push({
                         text: "Vie Current Price if ended (Link to Dextools)",
                         url: "https://www.dextools.io/app/",
                       });
-                      inlineKeyboards.inline_keyboard[0].push({
-                        text: "Contribute Now OR SEND",
-                        callback_data: `Contribute_${pool.poolAddress}`,
-                      });
-                      inlineKeyboards.inline_keyboard[0].push({
+                      inlineKeyboards.inline_keyboard.push([
+                        {
+                          text: "Contribute Now OR SEND",
+                          callback_data: `Contribute_${pool.poolAddress}`,
+                        },
+                      ]);
+                      inlineKeyboards.inline_keyboard[1].push({
                         text: "Emergency Withdraw",
                         callback_data: `EW_${pool.poolAddress}`,
                       });
-                      inlineKeyboards.inline_keyboard[0].push({
-                        text: "Return",
-                        callback_data: "return",
-                      });
+                      inlineKeyboards.inline_keyboard.push([
+                        {
+                          text: "Return",
+                          callback_data: "return",
+                        },
+                      ]);
                       sentMessageId = await ctx.reply(returnText, {
+                        parse_mode: "HTML",
                         reply_markup: inlineKeyboards,
                       });
                     }
@@ -2301,7 +2388,9 @@ async function mainFunc() {
           } else if (session.isExpectingAnswer === "search") {
             if (isValidEthereumAddress(answer) == true) {
               session.isExpectingAnswer = "";
-              PoolInfo.find({ token_address: new RegExp('^' + answer + '$', 'i')  })
+              PoolInfo.find({
+                token_address: new RegExp("^" + answer + "$", "i"),
+              })
                 .then(async (pools) => {
                   if (pools === null || pools.length === 0) {
                     sentMessageId = await ctx.reply("⚠️ No result!");
@@ -2315,55 +2404,50 @@ async function mainFunc() {
                           ],
                         ],
                       };
-                      const tokenInfomationResult = getPresaleInformation(
-                        pool.poolAddress,
-                        pool.token_address
-                      );
-                      const returnText = `Overview of Token\n
-                    <b>Project Description</b>: ${pool.description}\n
-                    <b>Token Metrics</b>: ${pool.token_name} ${
-                        pool.token_symbol
-                      }\n
-                    <b>Presale Goals</b>: ${pool.softcap}${
+                      const tokenInformationResult =
+                        await getPresaleInformation(
+                          pool.poolAddress,
+                          pool.token_address
+                        );
+                      const returnText = `Overview of Token\n<b>Project Description</b>: ${pool.description}\n<b>Token Metrics</b>: ${pool.token_name} ${pool.token_symbol}\n<b>Presale Goals</b>: ${parseSoftCap(pool.softcap, pool.accepted_currency)}${
                         pool.accepted_currency
-                      }\n
-                    <b>Presale Stats</b>: ${
-                      tokenInformation.totalDepositAmount
-                    }${pool.accepted_currency} raised, ${
-                        tokenInformation.totalContributors
-                      } contributors\n
-                    <b>Post Presale Actions</b>: ${pool.router}\n
-                    <b>Links Media</b>: ${pool.websiteURL}\n
-                    <b>Presale Time</b>: ${formatDate(
+                      }\n<b>Presale Stats</b>: ${
+                      parseSoftCap(tokenInformationResult.totalRaises, pool.accepted_currency)
+                    } ${pool.accepted_currency} raised, ${
+                        tokenInformationResult.totalContributors
+                      } contributors\n<b>Post Presale Actions</b>: ${pool.router}\n<b>Links Media</b>: ${pool.websiteURL}\n<b>Presale Time</b>: ${formatDate(
                       pool.startTime
-                    )} - ${formatDate(pool.endTime)}\n
-                    <b>Current Marketcap</b>: ${pool.marketCap}\n
-                    <b>Your contributions</b>":  ${
-                      tokenInfomationResult.contributionAmount
-                    }\n`;
+                    )} - ${formatDate(pool.endTime)}\n<b>Current Marketcap</b>: ${pool.marketCap}\n<b>Your contributions</b>:  ${
+                      parseSoftCap(tokenInformationResult.contributionAmount, pool.accepted_currency)
+                    } ${pool.accepted_currency}\n`;
 
                       inlineKeyboards.inline_keyboard[0].push({
                         text: "Back To Browse Projects",
-                        callback_data: "",
+                        callback_data: "back",
                       });
                       inlineKeyboards.inline_keyboard[0].push({
                         text: "Vie Current Price if ended (Link to Dextools)",
                         url: "https://www.dextools.io/app/",
                       });
-                      inlineKeyboards.inline_keyboard[0].push({
-                        text: "Contribute Now OR SEND",
-                        callback_data: `Contribute_${pool.poolAddress}`,
-                      });
-                      inlineKeyboards.inline_keyboard[0].push({
+                      inlineKeyboards.inline_keyboard.push([
+                        {
+                          text: "Contribute Now OR SEND",
+                          callback_data: `Contribute_${pool.poolAddress}`,
+                        },
+                      ]);
+                      inlineKeyboards.inline_keyboard[1].push({
                         text: "Emergency Withdraw",
                         callback_data: `EW_${pool.poolAddress}`,
                       });
-                      inlineKeyboards.inline_keyboard[0].push({
-                        text: "Return",
-                        callback_data: "return",
-                      });
+                      inlineKeyboards.inline_keyboard.push([
+                        {
+                          text: "Return",
+                          callback_data: "return",
+                        },
+                      ]);
                       sentMessageId = await ctx.reply(returnText, {
                         reply_markup: inlineKeyboards,
+                        parse_mode: "HTML",
                       });
                     }
                   }
@@ -2466,7 +2550,7 @@ async function mainFunc() {
               );
               sentMessageId = await ctx.reply(
                 `Amount to Contribute : <b>${answer}</b>\n`,
-                { reply_markup: inlineKeyboardContribute }
+                { reply_markup: inlineKeyboardContribute, parse_mode: "HTML" }
               );
             } else {
               sentMessageId = await ctx.reply("please input correct amount");
@@ -2726,7 +2810,7 @@ async function mainFunc() {
 
           sentMessageId = await ctx.reply(
             `Current Wallet's information : ${addressHex}\nEtheruem\n  ---- ETH: ${balanceResult.Ethereum.NATIVE}\n  ---- USDT: ${balanceResult.Ethereum.USDT}\n  ---- BalzeX: ${balanceResult.Ethereum.BLAZEX}\nBinance\n  ---- BNB: ${balanceResult.Binance.NATIVE}\n  ---- USDT: ${balanceResult.Binance.USDT}\n  ---- BLAZEX: ${balanceResult.Binance.BLAZEX}`,
-            { reply_markup: inlineKeyboardOwnerWallet }
+            { reply_markup: inlineKeyboardOwnerWallet, parse_mode: "HTML" }
           );
         }
       } else if (data.startsWith("userwallet_")) {
@@ -2770,7 +2854,7 @@ async function mainFunc() {
             { reply_markup: inlineKeybardUserWallet }
           );
         }
-      }else if(data.startsWith("upcoming")){
+      } else if (data.startsWith("upcoming")) {
         let poolChain;
         let startString = "upcomingEtherum";
         if (data.startsWith("upcomingEthereum")) {
@@ -2782,13 +2866,31 @@ async function mainFunc() {
         const parts = data.split(startString);
         if (parts.length > 1) {
           const poolAddress = parts[1];
-          PoolInfo.find({ poolAddress: new RegExp('^' + poolAddress + '$', 'i') , chain: new RegExp('^' + poolChain + '$', 'i')  })
+          PoolInfo.find({
+            poolAddress: new RegExp("^" + poolAddress + "$", "i"),
+            chain: new RegExp("^" + poolChain + "$", "i"),
+          })
             .then(async (pools) => {
               if (pools.length > 0) {
+                const session =getSession(ctx.from.id);
                 const replyInlineKeyboard = new InlineKeyboard()
                   .row()
                   .text("Return", "return");
-                ctx.reply(`Token name : ${pools[0].token_name}\nStart Time : ${formatDate(pools[0].startTime)}\nDescription : ${pools[0].preview}`, {reply_markup : replyInlineKeyboard});
+                  const tokenInformationResult = await getPresaleInformation(
+                    poolAddress,
+                    poolAddress,
+                    session
+                  );
+                  if (tokenInformationResult.isFinalized === false) {
+                    await removeAllMessages(ctx, -1);
+                    await showInformationAboutProjectOwner(
+                      pools[0],
+                      ctx,
+                      tokenInformationResult,
+                      session,
+                      replyInlineKeyboard
+                    );
+                  }
               }
             })
             .catch(async (err) => {
@@ -2796,8 +2898,7 @@ async function mainFunc() {
               sentMessageId = await ctx.reply(`Wrong address inputed`);
             });
         }
-      }
-      else if (data.startsWith("ongoing")) {
+      } else if (data.startsWith("ongoing")) {
         let poolChain;
         let startString = "ongoingEtherum";
         if (data.startsWith("ongoingEthereum")) {
@@ -2809,7 +2910,10 @@ async function mainFunc() {
         const parts = data.split(startString);
         if (parts.length > 1) {
           const poolAddress = parts[1];
-          PoolInfo.find({ poolAddress: new RegExp('^' + poolAddress + '$', 'i') , chain: new RegExp('^' + poolChain + '$', 'i')  })
+          PoolInfo.find({
+            poolAddress: new RegExp("^" + poolAddress + "$", "i"),
+            chain: new RegExp("^" + poolChain + "$", "i"),
+          })
             .then(async (pools) => {
               if (pools.length > 0) {
                 const session = getSession(ctx.from.id);
@@ -2824,26 +2928,27 @@ async function mainFunc() {
                   //TODO : finalizeAddLP_
                   .text(
                     "Finalize & Add LP",
-                    `finalizeAddLP_${pools[0].chain}_${poolAddress}`
+                    `finalizeAddLP_${pools[0].chain}${poolAddress}`
                   )
                   //TODO : cancelRefund_
                   .text(
                     "Cancel & Refund",
-                    `refund_${pools[0].chain}_${poolAddress}`
+                    `refund_${pools[0].chain}${poolAddress}`
                   )
                   .row()
                   .text("Return", "return");
 
-                const tokenInfomationResult = getPresaleInformation(
+                const tokenInformationResult = await getPresaleInformation(
                   poolAddress,
                   poolAddress,
                   session
                 );
-                if (tokenInfomationResult.isFinalized === false) {
+                if (tokenInformationResult.isFinalized === false) {
+                  await removeAllMessages(ctx, -1);
                   await showInformationAboutProjectOwner(
                     pools[0],
                     ctx,
-                    tokenInfomationResult,
+                    tokenInformationResult,
                     session,
                     replyInlineKeyboard
                   );
@@ -2860,27 +2965,30 @@ async function mainFunc() {
         const parts = data.split("finished");
         if (parts.length > 1) {
           const poolAddress = parts[1];
-          PoolInfo.find({ poolAddress: new RegExp('^' + poolAddress + '$', 'i')  })
+          PoolInfo.find({
+            poolAddress: new RegExp("^" + poolAddress + "$", "i"),
+          })
             .then(async (pools) => {
               if (pools.length > 0) {
                 const session = getSession(ctx.from.id);
                 const replyInlineKeyboard = new InlineKeyboard()
-                  .text("Refund", `refund_${poolAddress}`)
+                  .text("Refund", `refund_${pools[0].chain}${poolAddress}`)
                   .row()
                   //TODO : finalizeAddLP_
-                  .text("Finalize & Add LP", `finalizeAddLP_${poolAddress}`)
+                  .text("Finalize & Add LP", `finalizeAddLP_${pools[0].chain}${poolAddress}`)
                   .row()
                   .text("Return", "return");
 
-                const tokenInfomationResult = getPresaleInformation(
+                const tokenInformationResult = await getPresaleInformation(
                   poolAddress,
                   poolAddress,
                   session
                 );
+                await removeAllMessages(ctx, -1);
                 await showInformationAboutProjectOwner(
                   pools[0],
                   ctx,
-                  tokenInfomationResult,
+                  tokenInformationResult,
                   session,
                   replyInlineKeyboard
                 );
@@ -2929,7 +3037,7 @@ async function mainFunc() {
               session.accepted_currency.value === "BNB"
             ) {
               await presaleContract.methods
-                .buyWithETH(ethUtil.zeroAddress)
+                .buyWithETH(ethUtil.zeroAddress())
                 .send({ from: sender, value: session.amountToContribute });
             } else {
               const tokenContract = new web3.eth.Contract(
@@ -2942,20 +3050,20 @@ async function mainFunc() {
               setTimeout(async () => {
                 await presaleContract.methods
                   .buyWithToken(
-                    ethUtil.zeroAddress,
+                    ethUtil.zeroAddress(),
                     session.token_address.value
                   )
                   .send({ from: sender, value: session.amountToContribute });
               }, 10000);
             }
-            sentMessageId = await ctx.reply("✅ Successfully contributed!!!");
+            sentMessageId = await ctx.reply("✅ Successfully contributed!!!", {reply_markup : returnKeyboard});
             ContributionInfo.findOne({
-              userWallet: new RegExp('^' + sender + '$', 'i') ,
-              poolAddress: new RegExp('^' + poolAddress + '$', 'i') ,
+              userWallet: new RegExp("^" + sender + "$", "i"),
+              poolAddress: new RegExp("^" + poolAddress + "$", "i"),
             })
               .then((contribution) => {
                 const currentTime = new Date();
-                const timestamp = Number(currentTime * 1000).toFixed(0);
+                const timestamp = Number(currentTime / 1000).toFixed(0);
 
                 if (contribution) {
                   ContributionInfo.updateOne(contribution, {
@@ -2974,7 +3082,7 @@ async function mainFunc() {
                   const newContribution = new ContributionInfo({
                     userWallet: sender,
                     poolAddress: poolAddress,
-                    contributionAmount: amountToContribute,
+                    contributionAmount: session.amountToContribute,
                     contributionTime: timestamp,
                   });
                   newContribution
@@ -2990,7 +3098,9 @@ async function mainFunc() {
               .catch((err) => {
                 console.log(err);
               });
-          } catch (err) {}
+          } catch (err) {
+            console.log(err);
+          }
         }
       } else if (data.startsWith("EW_")) {
         const parts = data.split("EW_");
@@ -3034,7 +3144,7 @@ async function mainFunc() {
             .send({ from: sender });
 
           sentMessageId = await ctx.reply(
-            `✅ Successfully Emergency Withdrawn!!!`
+            `✅ Successfully Emergency Withdrawn!!!`, {reply_markup:returnKeyboard}
           );
         }
       } else if (data.startsWith("deposit_")) {
@@ -3143,57 +3253,53 @@ async function mainFunc() {
           const accounts = await web3.eth.getAccounts();
           const sender = accounts[0];
           const presaleContract = new web3.eth.Contract(
-            factoryABI,
-            factoryAddress[session.chain]
+            fairlaunchAbi,
+            poolAddress
           );
           const isFinalized = await presaleContract.methods
             .isFinalized()
             .call({ from: sender });
-          PoolInfo.find({ poolAddress: new RegExp('^' + poolAddress + '$', 'i') , chain: new RegExp('^' + poolChain + '$', 'i')  })
+          PoolInfo.find({
+            poolAddress: new RegExp("^" + poolAddress + "$", "i"),
+            chain: new RegExp("^" + poolChain + "$", "i"),
+          })
             .then(async (pools) => {
               if (pools === null || pools.length === 0) {
                 sentMessageId = await ctx.reply("⚠️ No result!");
               } else {
                 for (const pool of pools) {
                   const inlineKeyboardUserProject = new InlineKeyboard();
-                  const tokenInfomationResult = getPresaleInformation(
+                  const tokenInformationResult = await getPresaleInformation(
                     pool.poolAddress,
                     pool.token_address,
                     session
                   );
                   let returnText = "";
                   if (isFinalized === false) {
-                    `Overview of Token\n
-                    <b>Project Description</b>: ${pool.description}\n
-                    <b>Token Metrics</b>: ${pool.token_name} ${
+                    returnText = `Overview of Token\n<b>Project Description</b>: ${pool.description}\n<b>Token Metrics</b>: ${pool.token_name} ${
                       pool.token_symbol
-                    }\n
-                    <b>Presale Goals</b>: ${pool.softcap}${
+                    }\n<b>Presale Goals</b>: ${parseSoftCap(pool.softcap, pool.accepted_currency)}${
                       pool.accepted_currency
-                    }\n
-                    <b>Presale Stats</b>: ${
-                      tokenInformation.totalDepositAmount
-                    }${pool.accepted_currency} raised, ${
-                      tokenInformation.totalContributors
-                    } contributors\n
-                    <b>Post Presale Actions</b>: ${pool.router}\n
-                    <b>Links Media</b>: ${pool.websiteURL}\n
-                    <b>Presale Time</b>: ${formatDate(
+                    }\n<b>Presale Stats</b>: ${
+                      parseSoftCap(tokenInformationResult.totalRaises, pool.accepted_currency)
+                    } ${pool.accepted_currency} raised, ${
+                      tokenInformationResult.totalContributors
+                    } contributors\n<b>Post Presale Actions</b>: ${pool.router}\n<b>Links Media</b>: ${pool.websiteURL}\n<b>Presale Time</b>: ${formatDate(
                       pool.startTime
-                    )} - ${formatDate(pool.endTime)}\n
-                    <b>Current Marketcap</b>: ${pool.marketCap}\n
-                    <b>Your contributions</b>":  ${
-                      tokenInfomationResult.contributionAmount
-                    }\n`;
+                    )} - ${formatDate(pool.endTime)}\n<b>Current Marketcap</b>: ${pool.marketCap}\n<b>Your contributions</b>:  ${
+                      parseSoftCap(tokenInformationResult.contributionAmount, pool.accepted_currency)
+                    } ${pool.accepted_currency}\n`;
 
                     inlineKeyboardUserProject.text(
                       "Back To Browse Projects",
-                      ""
+                      "back"
                     );
                     inlineKeyboardUserProject.url(
                       "Vie Current Price if ended (Link to Dextools)",
                       "https://www.dextools.io/app/"
                     );
+
+                    inlineKeyboardUserProject.row();
 
                     inlineKeyboardUserProject.text(
                       "Contribute Now OR SEND",
@@ -3203,42 +3309,36 @@ async function mainFunc() {
                       "Emergency Withdraw",
                       `EW_${pool.poolAddress}`
                     );
+                    inlineKeyboardUserProject.row();
                     inlineKeyboardUserProject.text("Return", "return");
                     sentMessageId = await ctx.reply(returnText, {
                       reply_markup: inlineKeyboardUserProject,
+                      parse_mode: "HTML",
                     });
                   } else {
-                    `Overview of Token\n
-                      <b>Project Description</b>: ${pool.description}\n
-                      <b>Token Metrics</b>: ${pool.token_name} ${
+                    returnText = `Overview of Token\n  <b>Project Description</b>: ${pool.description}\n  <b>Token Metrics</b>: ${pool.token_name} ${
                       pool.token_symbol
-                    }\n
-                      <b>Presale Goals</b>: ${pool.softcap}${
+                    }\n  <b>Presale Goals</b>: ${parseSoftCap(pool.softcap, pool.accepted_currency)}${
                       pool.accepted_currency
-                    }\n
-                      <b>Presale Stats</b>: ${
-                        tokenInformation.totalDepositAmount
-                      }${pool.accepted_currency} raised, ${
-                      tokenInformation.totalContributors
-                    } contributors\n
-                      <b>Post Presale Actions</b>: ${pool.router}\n
-                      <b>Links Media</b>: ${pool.websiteURL}\n
-                      <b>Presale Time</b>: ${formatDate(
+                    }\n  <b>Presale Stats</b>: ${
+                        parseSoftCap(tokenInformationResult.totalRaises, pool.accepted_currency)
+                      } ${pool.accepted_currency} raised, ${
+                      tokenInformationResult.totalContributors
+                    } contributors\n  <b>Post Presale Actions</b>: ${pool.router}\n  <b>Links Media</b>: ${pool.websiteURL}\n  <b>Presale Time</b>: ${formatDate(
                         pool.startTime
-                      )} - ${formatDate(pool.endTime)}\n
-                      <b>Current Marketcap</b>: ${pool.marketCap}\n
-                      <b>Your contributions</b>":  ${
-                        tokenInfomationResult.contributionAmount
-                      }\n`;
+                      )} - ${formatDate(pool.endTime)}\n  <b>Current Marketcap</b>: ${pool.marketCap}\n  <b>Your contributions</b>:  ${
+                        parseSoftCap(tokenInformationResult.contributionAmount, pool.accepted_currency)
+                      } ${pool.accepted_currency}\n`;
 
                     inlineKeyboardUserProject.text(
                       "Back To Browse Projects",
-                      ""
+                      "back"
                     );
                     inlineKeyboardUserProject.url(
                       "Vie Current Price if ended (Link to Dextools)",
                       "https://www.dextools.io/app/"
                     );
+                    inlineKeyboardUserProject.row();
                     inlineKeyboardUserProject.text(
                       "Claim",
                       `userClaim_${pool.poolAddress}`
@@ -3246,8 +3346,10 @@ async function mainFunc() {
                     inlineKeyboardUserProject.text("Return", "return");
                     sentMessageId = await ctx.reply(returnText, {
                       reply_markup: inlineKeyboardUserProject,
+                      parse_mode: "HTML",
                     });
                   }
+                  session.today_messages.push(sentMessageId.message_id);
                 }
               }
             })
@@ -3255,98 +3357,155 @@ async function mainFunc() {
               console.log(err);
             });
         }
-      } else if (data.startsWith("editProjectDetails_")) {
-      } else if (data.startsWith("userClaim_")) {
-        const parts = data.split("userClaim_");
-        if (parts.length > 1) {
-          try {
-            const poolAddress = parts[1];
-            const session = getSession(ctx.from.id);
-            const privateKey = session.wallets[session.selectedWallet - 1];
-            // Setup provider with the private key
-            const provider = new HDWalletProvider({
-              privateKeys: [privateKey],
-              providerOrUrl: providerURL[session.chain.value],
-            });
-
-            const web3 = new Web3(provider);
-            const accounts = await web3.eth.getAccounts();
-            const sender = accounts[0];
-
-            const presaleContract = new web3.eth.Contract(
-              fairlaunchAbi,
-              poolAddress
-            );
-            await presaleContract.methods.claim().send({ from: sender });
-            sentMessageId = await ctx.reply(
-              "✅ Claiming successfully submitted"
-            );
-          } catch (err) {
-            console.log("user claim!!", err);
-          }
-        } else {
-          console.log("wrong type user claim!!!");
-        }
-      } else if (data.startsWith("finalizeAddLP_")) {
+      } else if (data.startsWith("live")) {
         let poolChain;
-        const session = getSession(ctx.from.id);
-        let startString = "finalizeAddLP_Etherum_";
-        if (data.startsWith("finalizeAddLP_Ethereum_")) {
+        let startString = "liveEtherum";
+        if (data.startsWith("liveEthereum")) {
           poolChain = "Ethereum";
-        } else if (data.startsWith("finalizeAddLP_Binance_")) {
+        } else if (data.startsWith("liveBinance")) {
           poolChain = "Binance";
-          startString = "finalizeAddLP_Binance_";
+          startString = "liveBinance";
         }
-
         const parts = data.split(startString);
         if (parts.length > 1) {
           const poolAddress = parts[1];
-          try {
-            await finalizeAndAddLPFunc(
-              session.walltes[session.selectedWallet - 1],
-              poolAddress,
-              poolChain
-            );
-          } catch (err) {
-            console.log(err);
-            sentMessageId = await ctx.reply(`⚠️ Failed finalize!!!`);
-          }
-        } else {
-          sentMessageId = await ctx.reply(`⚠️ Failed finalize!!!`);
+          const session = getSession(ctx.from.id);
+          PoolInfo.find({
+            poolAddress: new RegExp("^" + poolAddress + "$", "i"),
+          })
+            .then(async (pools) => {
+              if (pools === null || pools.length === 0) {
+                sentMessageId = await ctx.reply("⚠️ No result!");
+              } else {
+                for (const pool of pools) {
+                  const inlineKeyboards = {
+                    inline_keyboard: [
+                      [
+                        // { text: "Button 1", callback_data: "data_1" },
+                        // { text: "Button 2", callback_data: "data_2" },
+                      ],
+                    ],
+                  };
+                  const tokenInformationResult = await getPresaleInformation(
+                    pool.poolAddress,
+                    pool.token_address,
+                    session
+                  );
+                  const returnText = `Overview of Token\n<b>Project Description</b>: ${pool.description}\n<b>Token Metrics</b>: ${pool.token_name} ${
+                    pool.token_symbol
+                  }\n<b>Presale Goals</b>: ${parseSoftCap(pool.softcap, pool.accepted_currency)}${
+                    pool.accepted_currency
+                  }\n<b>Presale Stats</b>: ${
+                      parseSoftCap(tokenInformationResult.totalRaises, pool.accepted_currency)
+                    } ${pool.accepted_currency} raised, ${
+                    tokenInformationResult.totalContributors
+                  } contributors\n<b>Post Presale Actions</b>: ${pool.router}\n<b>Links Media</b>: ${pool.websiteURL}\n<b>Presale Time</b>: ${formatDate(
+                      pool.startTime
+                    )} - ${formatDate(pool.endTime)}\n<b>Current Marketcap</b>: ${pool.marketCap}\n<b>Your contributions</b>:  ${
+                      parseSoftCap(tokenInformationResult.contributionAmount, pool.accepted_currency)
+                    } ${pool.accepted_currency}\n`;
+
+                  inlineKeyboards.inline_keyboard[0].push({
+                    text: "Back To Browse Projects",
+                    callback_data: "back",
+                  });
+                  inlineKeyboards.inline_keyboard[0].push({
+                    text: "Vie Current Price if ended (Link to Dextools)",
+                    url: "https://www.dextools.io/app/",
+                  });
+                  inlineKeyboards.inline_keyboard.push([
+                    {
+                      text: "Contribute Now OR SEND",
+                      callback_data: `Contribute_${pool.poolAddress}`,
+                    },
+                  ]);
+                  inlineKeyboards.inline_keyboard[1].push({
+                    text: "Emergency Withdraw",
+                    callback_data: `EW_${pool.poolAddress}`,
+                  });
+                  inlineKeyboards.inline_keyboard.push([
+                    {
+                      text: "Return",
+                      callback_data: "return",
+                    },
+                  ]);
+                  sentMessageId = await ctx.reply(returnText, {
+                    reply_markup: inlineKeyboards,
+                    parse_mode: "HTML",
+                  });
+                }
+              }
+            })
+            .catch((err) => {
+              console.log(err);
+            });
+        }
+      } else if (data.startsWith("claim")){
+        let poolChain;
+        let startString = "claimEtherum";
+        if (data.startsWith("claimEthereum")) {
+          poolChain = "Ethereum";
+        } else if (data.startsWith("claimBinance")) {
+          poolChain = "Binance";
+          startString = "claimBinance";
+        }
+        const parts = data.split(startString);
+        if (parts.length > 1) {
+          const poolAddress = parts[1];
         }
       } else if (data.startsWith("refund_")) {
         let poolChain;
-        const session = getSession(ctx.from.id);
-        let startString = "refund_Etherum_";
-        if (data.startsWith("refund_Ethereum_")) {
+        let startString = "refundEtherum";
+        if (data.startsWith("refundEthereum")) {
           poolChain = "Ethereum";
-        } else if (data.startsWith("refund_Binance_")) {
+        } else if (data.startsWith("refundBinance")) {
           poolChain = "Binance";
-          startString = "refund_Binance_";
+          startString = "refundBinance";
         }
-
         const parts = data.split(startString);
         if (parts.length > 1) {
           const poolAddress = parts[1];
-          try {
-            await cancelAndRefundFunc(
-              session.walltes[session.selectedWallet - 1],
-              poolAddress,
-              poolChain
-            );
-          } catch (err) {
-            console.log(err);
-            sentMessageId = await ctx.reply(`⚠️ Failed refund!!!`);
+          const session = getSession(ctx.from.id);
+          sentMessageId = await ctx.reply("Cancel and Refund is in progress ...\nPlease wait");
+          session.today_messages.push(sentMessageId.message_id);
+          const result = await cancelAndRefundFunc(session.wallets[session.selectedWallet - 1], poolAddress, poolChain);
+          if(result === true){
+            await removeAllMessages(ctx, 0);
+            sentMessageId = await ctx.reply("✅ Successfully finalized and added lp");
+          } else {
+            await removeAllMessages(ctx, 0);
+            sentMessageId = await ctx.reply("⚠️ Failed finalization");
           }
-        } else {
-          sentMessageId = await ctx.reply(`⚠️ Failed refund!!!`);
+          session.today_messages.push(sentMessageId.message_id);
+        }
+      } else if(data.startsWith("finalizeAddLP_")){
+        let poolChain;
+        let startString = "finalizeAddLP_Etherum";
+        if (data.startsWith("finalizeAddLP_Ethereum")) {
+          poolChain = "Ethereum";
+        } else if (data.startsWith("finalizeAddLP_Binance")) {
+          poolChain = "Binance";
+          startString = "finalizeAddLP_Binance";
+        }
+        const parts = data.split(startString);
+        if (parts.length > 1) {
+          const poolAddress = parts[1];
+          const session = getSession(ctx.from.id);
+          sentMessageId = await ctx.reply("Finalizing Presale and Adding LP ....\nPlease wait");
+          session.today_messages.push(sentMessageId.message_id);
+          const result = await finalizeAndAddLPFunc(session.wallets[session.selectedWallet - 1], poolAddress, poolChain);
+          if(result === true){
+            await removeAllMessages(ctx, 0);
+            sentMessageId = await ctx.reply("✅ Successfully finalized and added lp");
+          } else {
+            await removeAllMessages(ctx, 0);
+            sentMessageId = await ctx.reply("⚠️ Failed finalization");
+          }
+          session.today_messages.push(sentMessageId.message_id);
         }
       } else if (data === "return") {
         returnAction(ctx);
       }
-      const session = getSession(ctx.from.id);
-      if (sentMessageId !== undefined)
-        session.today_messages.push(sentMessageId.message_id);
     });
   } catch (err) {
     console.log(err);
