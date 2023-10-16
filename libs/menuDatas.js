@@ -136,15 +136,6 @@ const menuData = [
       {
         text: "My presales",
         name: "my-presales",
-        submenu: [
-          { text: "Ongoing Presales", name: "ongoing-presales" },
-          {
-            text: "Finished Presales",
-            name: "finished-presales",
-            isRow: true,
-            isLast: true,
-          },
-        ],
       },
       {
         text: "⚙️ Presale Settings",
@@ -152,7 +143,7 @@ const menuData = [
         isRow: true,
         submenu: [
           { text: "Claim Settings", name: "claim-settings" },
-          { text: "Refund Menu", name: "refund-menu", isRow: true },
+          { text: "Refund", name: "refund-menu", isRow: true },
           { text: "Finalize Presale", name: "finalize-presale", isLast: true },
         ],
         isLast: true,
@@ -170,11 +161,7 @@ const menuData = [
       submenu: [
         {
           text: "Find a presale",
-          name: "find-presale",
-          submenu: [
-            { text: "Find Project", name: "find-project" },
-            { text: "Search", name: "search", isRow: true, isLast: true },
-          ],
+          name: "find-project",
         },
         {
           text: "Live Presales",
@@ -186,6 +173,7 @@ const menuData = [
           name: "upcoming-presales",
 
           isLast: true,
+          isRow : true,
         },
       ],
     },
@@ -221,7 +209,7 @@ const menuData = [
           text: "Contributions",
           name: "contributions",
         },
-        { text: "Claim", name: "claim", isLast: true },
+        { text: "Claim", name: "claim", isRow:true, isLast: true },
       ],
       isLast: true,
     },]
