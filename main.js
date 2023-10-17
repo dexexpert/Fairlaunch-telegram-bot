@@ -271,7 +271,7 @@ function getSession(userId) {
         category: "configuration",
         validation: (val) => {
           if (val !== undefined && isNumber(val)) {
-            return val >= 51;
+            return val > 51;
           }
           return false;
         },
@@ -2457,7 +2457,7 @@ async function mainFunc() {
                       });
                       inlineKeyboards.inline_keyboard.push([
                         {
-                          text: "Contribute Now OR SEND",
+                          text: "Contribute",
                           callback_data: `Contribute_${pool.poolAddress}`,
                         },
                       ]);
@@ -2527,7 +2527,7 @@ async function mainFunc() {
                       });
                       inlineKeyboards.inline_keyboard.push([
                         {
-                          text: "Contribute Now OR SEND",
+                          text: "Contribute",
                           callback_data: `Contribute_${pool.poolAddress}`,
                         },
                       ]);
@@ -2648,16 +2648,17 @@ async function mainFunc() {
           ) {
             const parts = session.isExpectingAnswer.split("amountToContribute");
             if (isNumber(answer)) {
-              session.amountToContribute = answer;
+              PoolInfo.findOne({poolAddress : new RegExp("^" + parts[1] + "$", "i")}).then(async pool => {session.amountToContribute = answer;
               session.isExpectingAnswer = "";
               const inlineKeyboardContribute = new InlineKeyboard().text(
                 `Contribute ${answer}`,
                 `user_contribute${parts[1]}`
               );
               sentMessageId = await ctx.reply(
-                `Amount to Contribute : <b>${answer}</b>\n`,
+                `Amount to Contribute (${pool.accepted_currency}) :<b>${answer}</b>\n`,
                 { reply_markup: inlineKeyboardContribute, parse_mode: "HTML" }
-              );
+              );}).catch(err => console.log(err))
+              
             } else {
               sentMessageId = await ctx.reply("please input correct amount");
             }
@@ -3161,8 +3162,10 @@ async function mainFunc() {
         if (parts.length > 1) {
           const session = getSession(ctx.from.id);
           const poolAddress = parts[1];
-          sentMessageId = await ctx.reply(`Amount to Contribute : `);
-          session.isExpectingAnswer = `amountToContribute${poolAddress}`;
+          PoolInfo.findOne({poolAddress : new RegExp("^" + poolAddress + "$", "i")}).then(async pool => {
+            session.isExpectingAnswer = "";
+          sentMessageId = await ctx.reply(`Amount to Contribute (${pool.accepted_currency}): `, {reply_markup : {force_reply : true}});
+          session.isExpectingAnswer = `amountToContribute${poolAddress}`;}).catch(err => console.log(err))
         }
       } else if (data.startsWith("user_contribute")) {
         const parts = data.split("user_contribute");
@@ -3194,22 +3197,24 @@ async function mainFunc() {
             ) {
               await presaleContract.methods
                 .buyWithETH(ethUtil.zeroAddress())
-                .send({ from: sender, value: session.amountToContribute });
+                .send({ from: sender, value: parseUnits(session.amountToContribute, 18) });
             } else {
               const tokenContract = new web3.eth.Contract(
                 tokenAbi,
                 session.token_address.value
               );
+              const numberOfDecimals = await tokenContract.methods.decimals().call({from : sender});
+              const contributionAmountinWei = parseUnits(session.amountToContribute, numberOfDecimals);
               await tokenContract.methods
-                .approve(poolAddress, session.amountToContribute)
+                .approve(poolAddress, parseUnits(session.amountToContribute, numberOfDecimals))
                 .send({ from: sender });
               setTimeout(async () => {
                 await presaleContract.methods
                   .buyWithToken(
+                    parseUnits(session.amountToContribute, numberOfDecimals),
                     ethUtil.zeroAddress(),
-                    session.token_address.value
                   )
-                  .send({ from: sender, value: session.amountToContribute });
+                  .send({ from: sender});
               }, 10000);
             }
             sentMessageId = await ctx.reply("✅ Successfully contributed!!!", {
@@ -3500,7 +3505,7 @@ async function mainFunc() {
                     inlineKeyboardUserProject.row();
 
                     inlineKeyboardUserProject.text(
-                      "Contribute Now OR SEND",
+                      "Contribute",
                       `Contribute_${pool.poolAddress}`
                     );
                     inlineKeyboardUserProject.text(
@@ -3598,7 +3603,7 @@ async function mainFunc() {
                   });
                   inlineKeyboards.inline_keyboard.push([
                     {
-                      text: "Contribute Now OR SEND",
+                      text: "Contribute",
                       callback_data: `Contribute_${pool.poolAddress}`,
                     },
                   ]);
@@ -3768,9 +3773,11 @@ async function mainFunc() {
           console.log("Wrong address inputed");
         }
       } else if (data === "return") {
-        returnAction(ctx);
+        await returnAction(ctx);
       } else if (data === "returnToCreateFairlaunch") {
-        returnAction(ctx, fairlaunchCreationMenu);
+        await returnAction(ctx, fairlaunchCreationMenu);
+      } else if (data === "back") {
+        await returnAction(ctx, userMenu);
       }
     });
   } catch (err) {

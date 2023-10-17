@@ -382,6 +382,7 @@ async function getPresaleInformation(presale_address, token_address, session) {
       minimumBuyAmount,
       maximumBuyAmount,
       startTime,
+      lockupDays,
       endTime,
       maxContributionAmount,
       totalRaises,
@@ -409,6 +410,8 @@ async function showInformationAboutProjectOwner(
     tokenInfomationResult.symbol
   }</b>\n📊 Decimals:<b>${tokenInfomationResult.decimals}</b>\n📝 Description:${
     poolData.description
+  }\n<b>💰 Accepted Currency</b> : ${
+    poolData.accepted_currency
   }\n\n🔹 💰 Financial Details\n💸 Raised: <b>${parseSoftCap(
     tokenInfomationResult.totalRaises,
     poolData.accepted_currency
@@ -421,7 +424,7 @@ async function showInformationAboutProjectOwner(
   )}</b>\n🌊 Liquidity %:<b>${
     tokenInfomationResult.liquidityRatio
   }</b>\n🔒 Liquidity Lock Time: <b>${
-    tokenInfomationResult.lockupDates
+    tokenInfomationResult.lockupDays
   } days</b>\n🛒 Listing Platform: <b>${
     poolData.router
   }</b>\n\n🔹 🛍 Sale & Contribution Details\n⏰ Presale Start Time: <b>${formatDate(
