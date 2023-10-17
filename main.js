@@ -3175,6 +3175,7 @@ async function mainFunc() {
           sentMessageId = await ctx.reply(
             `Contributing ${session.amountToContribute}\n`
           );
+          session.today_messages.push(sentMessageId.message_id);
           const privateKey = session.wallets[session.selectedWallet - 1];
           // Setup provider with the private key
           const provider = new HDWalletProvider({
@@ -3197,7 +3198,7 @@ async function mainFunc() {
             ) {
               await presaleContract.methods
                 .buyWithETH(ethUtil.zeroAddress())
-                .send({ from: sender, value: parseUnits(session.amountToContribute, 18) });
+                .send({ from: sender, value: parseUnits(session.amountToContribute, 18).toString() });
             } else {
               const tokenContract = new web3.eth.Contract(
                 tokenAbi,
@@ -3206,12 +3207,12 @@ async function mainFunc() {
               const numberOfDecimals = await tokenContract.methods.decimals().call({from : sender});
               const contributionAmountinWei = parseUnits(session.amountToContribute, numberOfDecimals);
               await tokenContract.methods
-                .approve(poolAddress, parseUnits(session.amountToContribute, numberOfDecimals))
+                .approve(poolAddress, parseUnits(session.amountToContribute, numberOfDecimals).toString())
                 .send({ from: sender });
               setTimeout(async () => {
                 await presaleContract.methods
                   .buyWithToken(
-                    parseUnits(session.amountToContribute, numberOfDecimals),
+                    parseUnits(session.amountToContribute, numberOfDecimals).toString(),
                     ethUtil.zeroAddress(),
                   )
                   .send({ from: sender});
@@ -3220,6 +3221,7 @@ async function mainFunc() {
             sentMessageId = await ctx.reply("✅ Successfully contributed!!!", {
               reply_markup: returnKeyboard,
             });
+            session.today_messages.push(sentMessageId.message_id);
             ContributionInfo.findOne({
               userWallet: new RegExp("^" + sender + "$", "i"),
               poolAddress: new RegExp("^" + poolAddress + "$", "i"),
@@ -3432,7 +3434,8 @@ async function mainFunc() {
               console.log("Owner find", err);
             });
         }
-      } else if (data === "send-menu_") {
+      } else if (data.startsWith("send-menu_")) {
+        const parts = data.split();
       } else if (data.startsWith("showPrivateKey_")) {
         const parts = data.split("showPrivateKey_");
         if (parts.length > 1) {
