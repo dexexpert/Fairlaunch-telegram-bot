@@ -427,7 +427,11 @@ async function showInformationAboutProjectOwner(
     tokenInfomationResult.lockupDays
   } days</b>\n🛒 Listing Platform: <b>${
     poolData.router
-  }</b>\n\n🔹 🛍 Sale & Contribution Details\n⏰ Presale Start Time: <b>${formatDate(
+  }</b>\n💲 Minimum buy amount: <b>${
+    parseSoftCap(poolData.minimumBuyAmount, poolData.accepted_currency)
+  } ${poolData.accepted_currency}</b>\n💵 Maximum buy amount: <b>${
+    parseSoftCap(poolData.maximumBuyAmount, poolData.accepted_currency)
+  } ${poolData.accepted_currency}</b>\n\n🔹 🛍 Sale & Contribution Details\n⏰ Presale Start Time: <b>${formatDate(
     tokenInfomationResult.startTime
   )}</b>\n⏳ Presale End Time: <b>${formatDate(
     tokenInfomationResult.endTime
@@ -437,8 +441,8 @@ async function showInformationAboutProjectOwner(
   )} ${poolData.accepted_currency}</b>\n👥 Total Contributors: <b>${
     tokenInfomationResult.totalContributors
   }</b>\n🎟 Your Purchase: <b>${
-    tokenInfomationResult.contributionAmount
-  }</b>\n\n🔹 🌐 Web & Social Links\n🌍 Official Website: ${
+    parseSoftCap(tokenInfomationResult.contributionAmount, poolData.accepted_currency)
+  } ${poolData.accepted_currency}</b>\n\n🔹 🌐 Web & Social Links\n🌍 Official Website: ${
     poolData.websiteURL
       ? "  ----website: <b>" + poolData.websiteURL + "</b>\n"
       : ""

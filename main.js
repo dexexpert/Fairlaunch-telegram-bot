@@ -43,7 +43,7 @@ const providerURL = {
   Ethereum: "https://goerli.infura.io/v3/81f1f856e5854cda96f939fe2a658c40",
 };
 
-const { Bot, InlineKeyboard } = require("grammy");
+const { Bot, InlineKeyboard, session } = require("grammy");
 const { Menu } = require("@grammyjs/menu");
 const mongoose = require("mongoose");
 const { parse } = require("dotenv");
@@ -514,7 +514,8 @@ function getSession(userId) {
         const result = await tokenContract.methods
           .balanceOf(sender)
           .call({ from: sender });
-        if (result < val) {
+        const decimalNumber = await tokenContract.methods.decimals().call({from : sender});
+        if (formatUnits(result, parseInt(decimalNumber)) * 1.0 < formatUnits(val, parseInt(decimalNumber)) * 1.0) {
           sessions[userId].sellAmount.invalid_description =
             "⚠️ Must have enough tokens of that address in his wallet";
           return false;
@@ -1130,6 +1131,9 @@ async function initiateOwnerMenu(submenu, menuData, stackedMenus) {
                       cnt++;
                     }
                     inlineKeyboard.inline_keyboard.push([
+                      {text : "Go back", callback_data : item.isUserPart ? "returnToUserMenu" : "returnToOwnerMenu"}
+                    ]);
+                    inlineKeyboard.inline_keyboard.push([
                       { text: "Return", callback_data: "return" },
                     ]);
                     sentMessageId = await ctx.reply(
@@ -1182,6 +1186,9 @@ async function initiateOwnerMenu(submenu, menuData, stackedMenus) {
                             ongoingCount++;
                           }
                         }
+                        inlineKeyboard.inline_keyboard.push([
+                          {text : "⬅️ Go back", callback_data : "returnOwnerMenu"}
+                        ]);
                         inlineKeyboard.inline_keyboard.push([
                           {
                             text: "Return",
@@ -1243,6 +1250,12 @@ async function initiateOwnerMenu(submenu, menuData, stackedMenus) {
                         }
                         inlineKeyboard.inline_keyboard.push([
                           {
+                            text: "⬅️ Go back",
+                            callback_data: "returnToOwnerMenu",
+                          },
+                        ]);
+                        inlineKeyboard.inline_keyboard.push([
+                          {
                             text: "Return",
                             callback_data: "return",
                           },
@@ -1301,6 +1314,13 @@ async function initiateOwnerMenu(submenu, menuData, stackedMenus) {
                             claimSettingsCount++;
                           }
                         }
+                        
+                        inlineKeyboard.inline_keyboard.push([
+                          {
+                            text: "⬅️ Go back",
+                            callback_data: "returnToUserMenu",
+                          },
+                        ]);
                         inlineKeyboard.inline_keyboard.push([
                           {
                             text: "Return",
@@ -1366,6 +1386,12 @@ async function initiateOwnerMenu(submenu, menuData, stackedMenus) {
                         }
                         inlineKeyboard.inline_keyboard.push([
                           {
+                            text: "⬅️ Go back",
+                            callback_data: "returnToOwnerMenu",
+                          },
+                        ]);
+                        inlineKeyboard.inline_keyboard.push([
+                          {
                             text: "Return",
                             callback_data: "return",
                           },
@@ -1426,6 +1452,12 @@ async function initiateOwnerMenu(submenu, menuData, stackedMenus) {
                             finalizeCount++;
                           }
                         }
+                        inlineKeyboard.inline_keyboard.push([
+                          {
+                            text: "⬅️ Go back",
+                            callback_data: "returnToOwnerMenu",
+                          },
+                        ]);
                         inlineKeyboard.inline_keyboard.push([
                           {
                             text: "Return",
@@ -1491,6 +1523,12 @@ async function initiateOwnerMenu(submenu, menuData, stackedMenus) {
                       }
                       inlineKeyboard.inline_keyboard.push([
                         {
+                          text: "⬅️ Go back",
+                          callback_data: "returnToUserMenu",
+                        },
+                      ]);
+                      inlineKeyboard.inline_keyboard.push([
+                        {
                           text: "Return",
                           callback_data: "return",
                         },
@@ -1542,6 +1580,12 @@ async function initiateOwnerMenu(submenu, menuData, stackedMenus) {
                       }
                       inlineKeyboard.inline_keyboard.push([
                         {
+                          text: "⬅️ Go back",
+                          callback_data: "returnToUserMenu",
+                        },
+                      ]);
+                      inlineKeyboard.inline_keyboard.push([
+                        {
                           text: "Return",
                           callback_data: "return",
                         },
@@ -1580,6 +1624,7 @@ async function initiateOwnerMenu(submenu, menuData, stackedMenus) {
                       .text(`Deposit`, `deposit_${address}`)
                       .text(`Balance`, `balance_${address}`)
                       .row()
+                      .text("⬅️ Go back", "returnToOwnerMenu")
                       .text("Return", "return");
 
                     console.log(`Private Key: ${privateKey}`);
@@ -1714,6 +1759,12 @@ async function initiateOwnerMenu(submenu, menuData, stackedMenus) {
                             presaleCount++;
                           }
                         }
+                        inlineKeyboard.inline_keyboard.push([
+                          {
+                            text: "⬅️ Go back",
+                            callback_data: "returnToOwnerMenu",
+                          },
+                        ]);
                         inlineKeyboard.inline_keyboard.push([
                           {
                             text: "Return",
@@ -2471,6 +2522,12 @@ async function mainFunc() {
                       });
                       inlineKeyboards.inline_keyboard.push([
                         {
+                          text: "⬅️ Go back",
+                          callback_data: "returnToUserMenu",
+                        },
+                      ]);
+                      inlineKeyboards.inline_keyboard.push([
+                        {
                           text: "Return",
                           callback_data: "return",
                         },
@@ -2539,6 +2596,12 @@ async function mainFunc() {
                         text: "Emergency Withdraw",
                         callback_data: `EW_${pool.poolAddress}`,
                       });
+                      inlineKeyboards.inline_keyboard.push([
+                        {
+                          text: "⬅️ Go back",
+                          callback_data: "returnToUserMenu",
+                        },
+                      ]);
                       inlineKeyboards.inline_keyboard.push([
                         {
                           text: "Return",
@@ -2649,6 +2712,8 @@ async function mainFunc() {
             const parts = session.isExpectingAnswer.split("amountToContribute");
             if (isNumber(answer)) {
               PoolInfo.findOne({poolAddress : new RegExp("^" + parts[1] + "$", "i")}).then(async pool => {session.amountToContribute = answer;
+              if(parseSoftCap(pool.minimumBuyAmount, pool.accepted_currency) * 1.0 < answer * 1.0 && 
+                parseSoftCap(pool.maximumBuyAmount, pool.accepted_currency) * 1.0 > answer * 1.0){
               session.isExpectingAnswer = "";
               const inlineKeyboardContribute = new InlineKeyboard().text(
                 `Contribute ${answer}`,
@@ -2657,7 +2722,15 @@ async function mainFunc() {
               sentMessageId = await ctx.reply(
                 `Amount to Contribute (${pool.accepted_currency}) :<b>${answer}</b>\n`,
                 { reply_markup: inlineKeyboardContribute, parse_mode: "HTML" }
-              );}).catch(err => console.log(err))
+              );
+              session.today_messages.push(sentMessageId.message_id);
+                }else{
+                  sentMessageId = await ctx.reply(`⚠️ Your contribution amount invalid\nMinimum buy amount: ${parseSoftCap(pool.minimumBuyAmount, pool.accepted_currency)} ${pool.accepted_currency}\nMaximum buy amount: ${
+                    parseSoftCap(pool.maximumBuyAmount, pool.accepted_currency)
+                  } ${pool.accepted_currency}`)
+                  session.today_messages.push(sentMessageId.message_id);
+                }
+            }).catch(err => console.log(err))
               
             } else {
               sentMessageId = await ctx.reply("please input correct amount");
@@ -2725,6 +2798,7 @@ async function mainFunc() {
                     "walletReView"
                   )
                   .row()
+                  .text("⬅️ Go back", "returnToOwnerMenu")
                   .text("Return", "return");
                 let showMenu;
                 if (session[session.isExpectingAnswer].category === "setup") {
@@ -2806,6 +2880,27 @@ async function mainFunc() {
             );
         }
       }
+      if(validation_result === true) {
+        const privateKey = session.wallets[session.selectedWallet - 1];
+        const provider = new HDWalletProvider({
+          privateKeys : [privateKey],
+          providerOrUrl : providerURL[session.chain.value]
+        })
+        const web3 =new Web3(provider);
+        const accounts = await web3.eth.getAccounts();
+        const sender = accounts[0];
+
+        const tokenContract = new web3.eth.Contract(tokenAbi, session.token_address.value);
+        const result = await tokenContract.methods.balanceOf(sender).call({from : sender});
+        const decimalValue = await tokenContract.methods.decimals().call({from:sender});
+        const requiredTokenAmount = (100.0 + session.liquidityPercentage.value * 1.0) * formatUnits(session.sellAmount.value, parseInt(decimalValue)) / 100.0;
+        const currentTokenAmount = formatUnits(result, parseInt(decimalValue)) * 1.0;
+        if(currentTokenAmount < requiredTokenAmount) {
+          errors.push(`⚠️ Required token amount is ${requiredTokenAmount}, You don't have enough tokens in your wallet.\nYour balance : ${currentTokenAmount}`);
+          validation_result = false;
+        }
+      }
+
       if (validation_result === true) {
         if (session.wallets.length > 0) {
           await ctx.answerCallbackQuery({
@@ -2900,6 +2995,9 @@ async function mainFunc() {
               cnt++;
             }
             inlineKeyboard.inline_keyboard.push([
+              { text: "⬅️ Go back", callback_data: "returnToOwnerMenu" },
+            ]);
+            inlineKeyboard.inline_keyboard.push([
               { text: "Return", callback_data: "return" },
             ]);
             const result = await ctx.editMessageReplyMarkup({
@@ -2931,8 +3029,8 @@ async function mainFunc() {
           const inlineKeybardUserWallet = new InlineKeyboard()
             .text(
               "Contributions & Claim",
-              `userContributionAndClaim_${
-                session.wallets[session.selectedWallet - 1]
+              `userCC${
+                session.selectedWallet - 1
               }`
             )
             .text(
@@ -2952,12 +3050,14 @@ async function mainFunc() {
             // TODO : Send should be similar to Deployer Bot
             .text("Send", `send-menu_${session.selectedWallet - 1}`)
             .row()
+            .text("⬅️ Go back", "returnToUserMenu")
             .text("Return", "return");
 
           sentMessageId = await ctx.reply(
             "Current Owner Wallet's Information : " + addressHex,
             { reply_markup: inlineKeybardUserWallet }
           );
+          session.today_messages.push(sentMessageId.message_id);
         }
       } else if (data.startsWith("upcoming")) {
         let poolChain;
@@ -3001,6 +3101,8 @@ async function mainFunc() {
             .catch(async (err) => {
               console.log(err);
               sentMessageId = await ctx.reply(`Wrong address inputed`);
+              const session = getSession(ctx.from.id);
+              session.today_messages.push(sentMessageId.message_id);
             });
         }
       } else if (data.startsWith("ownerUpcoming")) {
@@ -3045,6 +3147,8 @@ async function mainFunc() {
             .catch(async (err) => {
               console.log(err);
               sentMessageId = await ctx.reply(`Wrong address inputed`);
+              const session = getSession(ctx.from.id);
+              session.today_messages.push(sentMessageId.message_id);
             });
         }
       } else if (data.startsWith("ongoing")) {
@@ -3083,6 +3187,7 @@ async function mainFunc() {
                     `refund_${poolChain}${poolAddress}`
                   )
                   .row()
+                  .text("⬅️ Go back", "returnToOwnerMenu")
                   .text("Return", "return");
 
                 const tokenInformationResult = await getPresaleInformation(
@@ -3106,6 +3211,8 @@ async function mainFunc() {
             .catch(async (err) => {
               console.log(err);
               sentMessageId = await ctx.reply(`Wrong address inputed`);
+              const session = getSession(ctx.from.id);
+              session.today_messages.push(sentMessageId.message_id);
             });
         }
       } else if (data.startsWith("finished")) {
@@ -3134,6 +3241,7 @@ async function mainFunc() {
                     `finalizeAddLP_${pools[0].chain}${poolAddress}`
                   )
                   .row()
+                  .text("⬅️ Go back", "returnToOwnerMenu")
                   .text("Return", "return");
 
                 const tokenInformationResult = await getPresaleInformation(
@@ -3155,6 +3263,8 @@ async function mainFunc() {
             .catch(async (err) => {
               console.log(err);
               sentMessageId = await ctx.reply(`Wrong address inputed`);
+              const session = getSession(ctx.from.id);
+              session.today_messages.push(sentMessageId.message_id);
             });
         }
       } else if (data.startsWith("Contribute_")) {
@@ -3165,6 +3275,7 @@ async function mainFunc() {
           PoolInfo.findOne({poolAddress : new RegExp("^" + poolAddress + "$", "i")}).then(async pool => {
             session.isExpectingAnswer = "";
           sentMessageId = await ctx.reply(`Amount to Contribute (${pool.accepted_currency}): `, {reply_markup : {force_reply : true}});
+          session.today_messages.push(sentMessageId.message_id);
           session.isExpectingAnswer = `amountToContribute${poolAddress}`;}).catch(err => console.log(err))
         }
       } else if (data.startsWith("user_contribute")) {
@@ -3273,7 +3384,7 @@ async function mainFunc() {
           const poolAddress = parts[1];
           const session = getSession(ctx.from.id);
           const EWInlineKeyboard = new InlineKeyboard()
-            .text("Emergency Withdraw!!!", `EW_PROCEED${poolAddress}`)
+            .text("Emergency Withdraw!!!", `EWPROCEED${poolAddress}`)
             .text("Return", "return");
           const privateKey = session.wallets[session.selectedWallet - 1];
           // Setup provider with the private key
@@ -3321,6 +3432,7 @@ async function mainFunc() {
             sentMessageId = await ctx.reply(
               "You didn't purchase during this presale!"
             );
+            session.today_messages.push(sentMessageId.message_id);
           } else {
             const formattedContributionAmount = parseSoftCap(
               userRes._amount,
@@ -3330,65 +3442,84 @@ async function mainFunc() {
               `You bought ${formattedContributionAmount} ${acceptedCurrencyString} during this Presale. Be aware that an emergency withdrawal will incur a 10% fee on your original purchase.`,
               { reply_markup: EWInlineKeyboard }
             );
+            session.today_messages.push(sentMessageId.message_id);
           }
         }
-      } else if (data.startsWith("EW_PROCEED")) {
-        const parts = data.split("EW_PROCEED");
+      } else if (data.startsWith("EWPROCEED")) {
+        const parts = data.split("EWPROCEED");
         if (parts.length > 1) {
-          const session = getSession(ctx.from.id);
-          const poolAddress = parts[1];
+          try{
+            const session = getSession(ctx.from.id);
+            const poolAddress = parts[1];
 
-          sentMessageId = await ctx.reply(`⚠️ Emergency Withdrawing\n`);
-          session.today_messages.push(sentMessageId.message_id);
-          const privateKey = session.wallets[session.selectedWallet - 1];
-          // Setup provider with the private key
-          const provider = new HDWalletProvider({
-            privateKeys: [privateKey],
-            providerOrUrl: providerURL[session.chain.value],
-          });
+            sentMessageId = await ctx.reply(`⚠️ Emergency Withdrawing\n`);
+            session.today_messages.push(sentMessageId.message_id);
+            const privateKey = session.wallets[session.selectedWallet - 1];
+            // Setup provider with the private key
+            const provider = new HDWalletProvider({
+              privateKeys: [privateKey],
+              providerOrUrl: providerURL[session.chain.value],
+            });
 
-          const web3 = new Web3(provider);
-          const accounts = await web3.eth.getAccounts();
-          const sender = accounts[0];
+            const web3 = new Web3(provider);
+            const accounts = await web3.eth.getAccounts();
+            const sender = accounts[0];
 
-          const presaleContract = new web3.eth.Contract(
-            fairlaunchAbi,
-            poolAddress
-          );
+            console.log("pool Address is : ", poolAddress);
 
-          await presaleContract.methods
-            .emergencyWithdraw()
-            .send({ from: sender });
+            const presaleContract = new web3.eth.Contract(
+              fairlaunchAbi,
+              poolAddress
+            );
 
-          sentMessageId = await ctx.reply(
-            `✅ Successfully Emergency Withdrawn!!!`,
-            { reply_markup: returnKeyboard }
-          );
+            await presaleContract.methods
+              .emergencyWithdraw()
+              .send({ from: sender });
+
+            sentMessageId = await ctx.reply(
+              `✅ Successfully Emergency Withdrawn!!!`,
+              { reply_markup: returnKeyboard }
+            );
+            session.today_messages.push(sentMessageId.message_id);
+          }catch(err) {
+            const session = getSession(ctx.from.id);
+            console.log(err);
+            sentMessageId = await ctx.reply(`Failed emergency withdraw!\n${err?.message}`);
+            session.today_messages.push(sentMessageId.message_id);
+          }
         }
       } else if (data.startsWith("deposit_")) {
         const parts = data.split("deposit_");
         const walletAddress = parts[1];
+        const session = getSession(ctx.from.id);
         sentMessageId = await ctx.reply(
           `Wallet Address: ${walletAddress}\nYou can send USDT/BLAZEX/ETH here`
         );
+        session.today_messages.push(sentMessageId.message_id);
       } else if (data.startsWith("balance_")) {
         const parts = data.split("balance_");
         const walletAddress = parts[1];
 
         const balanceResult = await getTotalBalance(walletAddress);
+        const session = getSession(ctx.from.id);
 
         sentMessageId = await ctx.reply(
           `Etheruem\n  ---- ETH: ${balanceResult.Ethereum.NATIVE}\n  ---- USDT: ${balanceResult.Ethereum.USDT}\n  ---- BalzeX: ${balanceResult.Ethereum.BLAZEX}\nBinance\n  ---- BNB: ${balanceResult.Binance.NATIVE}\n  ---- USDT: ${balanceResult.Binance.USDT}\n  ---- BLAZEX: ${balanceResult.Binance.BLAZEX}`
         );
+        session.today_messages.push(sentMessageId.message_id);
       } else if (data === "my-presales") {
+        const session = getSession(ctx.from.id);
         sentMessageId = await ctx.reply("My-Presales", {
           reply_markup: ongoingPresaleMenu,
         });
+        session.today_messages.push(sentMessageId.message_id);
       } else if (data === "start-fairlaunch") {
         await removeAllMessages(ctx, -1);
+        const session = getSession(ctx.from.id);
         sentMessageId = await ctx.reply("Start Fairlaunch", {
           reply_markup: ownerMenu,
         });
+        session.today_messages.push(sentMessageId.message_id);
       } else if (data.startsWith("removeWallet_")) {
         const session = getSession(ctx.from.id);
         const index = session.selectedWallet - 1;
@@ -3447,7 +3578,7 @@ async function mainFunc() {
         } else {
           sentMessageId = await ctx.reply(`⚠️ Unable to show you private key.`);
         }
-      } else if (data.startsWith("userContributionAndClaim_")) {
+      } else if (data.startsWith("userCC")) {
         const session = getSession(ctx.from.id);
         contributionAction(ctx, session);
       } else if (data.startsWith("userProject_")) {
@@ -3520,6 +3651,7 @@ async function mainFunc() {
                       `EW_${pool.poolAddress}`
                     );
                     inlineKeyboardUserProject.row();
+                    inlineKeyboardUserProject.text("⬅️ Go back", "returnToUserMenu")
                     inlineKeyboardUserProject.text("Return", "return");
                     await removeAllMessages(ctx, -1);
                     await showInformationAboutProjectOwner(
@@ -3543,6 +3675,7 @@ async function mainFunc() {
                       "Claim",
                       `userClaim_${pool.poolAddress}`
                     );
+                    inlineKeyboardUserProject.text("⬅️ Go back", "returnToUserMenu")
                     inlineKeyboardUserProject.text("Return", "return");
                     await removeAllMessages(ctx, -1);
                     await showInformationAboutProjectOwner(
@@ -3618,6 +3751,12 @@ async function mainFunc() {
                     text: "Emergency Withdraw",
                     callback_data: `EW_${pool.poolAddress}`,
                   });
+                  inlineKeyboards.inline_keyboard.push([
+                    {
+                      text: "⬅️ Go back",
+                      callback_data: "returnToUserMenu",
+                    },
+                  ]);
                   inlineKeyboards.inline_keyboard.push([
                     {
                       text: "Return",
@@ -3757,8 +3896,9 @@ async function mainFunc() {
                   inlineKeyboardUserProject.text('Instagram', `edit_Instagram${poolAddress}`).row();
                   inlineKeyboardUserProject.text('Reddit', `edit_Reddit${poolAddress}`);
                   inlineKeyboardUserProject.text('Preview', `edit_Preview${poolAddress}`).row();
-                  inlineKeyboardUserProject.text('Description', `edit_Description${poolAddress}`);
+                  inlineKeyboardUserProject.text('Description', `edit_Description${poolAddress}`).row();
                   let returnText = "";
+                  inlineKeyboardUserProject.text('⬅️ Go back', 'returnToOwnerMenu');
                   inlineKeyboardUserProject.text("Return", "return");
                   await removeAllMessages(ctx, -1);
                   delete pool._id;
@@ -3780,6 +3920,10 @@ async function mainFunc() {
       } else if (data === "returnToCreateFairlaunch") {
         await returnAction(ctx, fairlaunchCreationMenu);
       } else if (data === "back") {
+        await returnAction(ctx, userMenu);
+      } else if (data === "returnToOwnerMenu") {
+        await returnAction(ctx, ownerMenu);
+      } else if (data === "returnToUserMenu") {
         await returnAction(ctx, userMenu);
       }
     });
