@@ -86,10 +86,7 @@ async function replyCertainCategoryMessage(ctx, pool, category) {
         category === undefined ||
         categoryArray[fieldItem] == category
       ) {
-        if (
-          pool[fieldItem] !== undefined &&
-          pool[fieldItem] !== ""
-        ) {
+        if (pool[fieldItem] !== undefined && pool[fieldItem] !== "") {
           if (fieldItem === "startTime" || fieldItem === "endTime") {
             const stringOfDate = formatDate(pool[fieldItem]);
             textOutput += `${fieldItem}: <b>${stringOfDate}</b>\n`;
@@ -109,18 +106,14 @@ async function replyCertainCategoryMessage(ctx, pool, category) {
                 fieldItem === "maximumBuyAmount"
               ) {
                 let decimalValue = 18;
-                if (pool["accepted_currency"] === "BlazeX")
-                  decimalValue = 9;
-                else if (pool["accepted_currency"] === "USDT")
-                  decimalValue = 6;
+                if (pool["accepted_currency"] === "BlazeX") decimalValue = 9;
+                else if (pool["accepted_currency"] === "USDT") decimalValue = 6;
                 showValue = formatUnits(showValue, decimalValue);
                 currencyValue = pool.accepted_currency;
               }
               textOutput += `${fieldItem}: <b>${showValue} ${currencyValue}</b>\n`;
             } else
-              textOutput += `${fieldItem}: ${
-                pool[fieldItem] ? "✅" : "🚫"
-              }\n`;
+              textOutput += `${fieldItem}: ${pool[fieldItem] ? "✅" : "🚫"}\n`;
           }
         } else {
           textOutput += `${fieldItem} : <b>Not Set</b>\n`;
@@ -269,10 +262,21 @@ async function replyReviewLaunch(
     textOutput += `Total: 0.23 ${
       session.chain.value === "Binance" ? "BNB" : "ETH"
     }\n`;
-    const sentMessageId = await ctx.reply(textOutput, {
-      parse_mode: "HTML",
-      reply_markup: launchInlineKeyboard,
-    });
+    let sentMessageId;
+    if(session.preview.value !== undefined){
+      sentMessageId = await ctx.replyWithPhoto(
+        session.preview.value, {
+          parse_mode : "HTML",
+          reply_markup: launchInlineKeyboard,
+          caption : textOutput
+        }
+      )
+    } else {
+      sentMessageId = await ctx.reply(textOutput, {
+        parse_mode: "HTML",
+        reply_markup: launchInlineKeyboard,
+      });
+    }
     return sentMessageId;
   } catch (err) {
     console.log("review & launch", err);
@@ -427,11 +431,17 @@ async function showInformationAboutProjectOwner(
     tokenInfomationResult.lockupDays
   } days</b>\n🛒 Listing Platform: <b>${
     poolData.router
-  }</b>\n💲 Minimum buy amount: <b>${
-    parseSoftCap(poolData.minimumBuyAmount, poolData.accepted_currency)
-  } ${poolData.accepted_currency}</b>\n💵 Maximum buy amount: <b>${
-    parseSoftCap(poolData.maximumBuyAmount, poolData.accepted_currency)
-  } ${poolData.accepted_currency}</b>\n\n🔹 🛍 Sale & Contribution Details\n⏰ Presale Start Time: <b>${formatDate(
+  }</b>\n💲 Minimum buy amount: <b>${parseSoftCap(
+    poolData.minimumBuyAmount,
+    poolData.accepted_currency
+  )} ${
+    poolData.accepted_currency
+  }</b>\n💵 Maximum buy amount: <b>${parseSoftCap(
+    poolData.maximumBuyAmount,
+    poolData.accepted_currency
+  )} ${
+    poolData.accepted_currency
+  }</b>\n\n🔹 🛍 Sale & Contribution Details\n⏰ Presale Start Time: <b>${formatDate(
     tokenInfomationResult.startTime
   )}</b>\n⏳ Presale End Time: <b>${formatDate(
     tokenInfomationResult.endTime
@@ -440,9 +450,12 @@ async function showInformationAboutProjectOwner(
     poolData.accepted_currency
   )} ${poolData.accepted_currency}</b>\n👥 Total Contributors: <b>${
     tokenInfomationResult.totalContributors
-  }</b>\n🎟 Your Purchase: <b>${
-    parseSoftCap(tokenInfomationResult.contributionAmount, poolData.accepted_currency)
-  } ${poolData.accepted_currency}</b>\n\n🔹 🌐 Web & Social Links\n🌍 Official Website: ${
+  }</b>\n🎟 Your Purchase: <b>${parseSoftCap(
+    tokenInfomationResult.contributionAmount,
+    poolData.accepted_currency
+  )} ${
+    poolData.accepted_currency
+  }</b>\n\n🔹 🌐 Web & Social Links\n🌍 Official Website: ${
     poolData.websiteURL
       ? "  ----website: <b>" + poolData.websiteURL + "</b>\n"
       : ""
@@ -463,10 +476,19 @@ async function showInformationAboutProjectOwner(
       ? "  ----discord: <b>" + poolData.discordURL + "</b>\n"
       : ""
   }`;
-  const sentMessageId = await ctx.reply(outPutText, {
-    parse_mode: "HTML",
-    reply_markup: replyInlineKeyboard,
-  });
+  let sentMessageId;
+  if (poolData.preview !== undefined && poolData.preview !== "") {
+    sentMessageId = await ctx.replyWithPhoto(poolData.preview, {
+      reply_markup: replyInlineKeyboard,
+      parse_mode: "HTML",
+      caption: outPutText,
+    });
+  } else {
+    sentMessageId = await ctx.reply(outPutText, {
+      parse_mode: "HTML",
+      reply_markup: replyInlineKeyboard,
+    });
+  }
   session.today_messages.push(sentMessageId.message_id);
 }
 
