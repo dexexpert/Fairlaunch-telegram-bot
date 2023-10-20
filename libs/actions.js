@@ -7,6 +7,7 @@ const { formatUnits, BigNumber, formatEther } = require("ethers");
 const factoryABI = require("../abis/factoryABI");
 const tokenAbi = require("../abis/tokenAbi");
 const fairlaunchAbi = require("../abis/FairLaunch");
+const {InputFile} = require('grammy');
 function formatDate(date1) {
   const date = new Date(date1 * 1000);
   const year = date.getFullYear();
@@ -134,14 +135,15 @@ async function replyReviewMessage(ctx, session, category) {
     session.isExpectingAnswer = "";
     for (const fieldItem of fields) {
       if (
-        fieldItem === "chain" ||
+        fieldItem !== "preview" &&
+        (fieldItem === "chain" ||
         fieldItem === "token_address" ||
         fieldItem === "token_name" ||
         fieldItem === "symbol" ||
         (session[fieldItem].hasOwnProperty("validation") &&
           fieldItem !== "importedWallet" &&
           (category === undefined || session[fieldItem].category === category))
-      ) {
+      )) {
         if (
           session[fieldItem].value !== undefined &&
           session[fieldItem].value !== ""
@@ -183,6 +185,13 @@ async function replyReviewMessage(ctx, session, category) {
         }
       }
     }
+    if(category === "information") {
+      if(session.preview.value === undefined || session.preview.value === ""){
+        textOutput += `preview : <b>Not Set</b>\n`
+      } else {
+        textOutput += `preview : <b>Set</b>\n`
+      }
+    }
     const gwei = await fetchCurrentGwei();
     textOutput += "------------------------------\n";
     textOutput += `GWei: ${gwei.toFixed(2)}\n`;
@@ -212,6 +221,7 @@ async function replyReviewLaunch(
     session.isExpectingAnswer = "";
     for (const fieldItem of fields) {
       if (
+        fieldItem !== "preview" &&(
         fieldItem === "chain" ||
         fieldItem === "token_address" ||
         fieldItem === "token_name" ||
@@ -220,7 +230,7 @@ async function replyReviewLaunch(
           fieldItem !== "importedWallet" &&
           (category === undefined ||
             session[fieldItem].category === category)) ||
-        session[fieldItem].hasOwnProperty("notRequired")
+        session[fieldItem].hasOwnProperty("notRequired"))
       ) {
         if (
           session[fieldItem].value !== undefined &&
@@ -231,15 +241,25 @@ async function replyReviewLaunch(
             textOutput += `${fieldItem}: <b>${stringOfDate}</b>\n`;
           } else {
             if (typeof session[fieldItem].value !== "boolean") {
+              let showValue = session[fieldItem].value;
               let currencyValue = "";
-              if (fieldItem === "sellAmount") {
-                currencyValue =
-                  session.token_symbol.value + " (with 18 decimals)";
+              if (fieldItem === "sellAmount" || fieldItem === "token_supply") {
+                showValue = formatUnits(
+                  showValue,
+                  parseInt(session.token_decimals.value)
+                );
+                currencyValue = session.token_symbol.value;
               } else if (
                 fieldItem === "softcap" ||
                 fieldItem === "minimumBuyAmount" ||
                 fieldItem === "maximumBuyAmount"
               ) {
+                let decimalValue = 18;
+                if (session["accepted_currency"].value === "BlazeX")
+                  decimalValue = 9;
+                else if (session["accepted_currency"].value === "USDT")
+                  decimalValue = 6;
+                showValue = formatUnits(showValue, decimalValue);
                 currencyValue = session.accepted_currency.value;
               }
               textOutput += `${fieldItem}: <b>${session[fieldItem].value} ${currencyValue}</b>\n`;
@@ -265,7 +285,7 @@ async function replyReviewLaunch(
     let sentMessageId;
     if(session.preview.value !== undefined){
       sentMessageId = await ctx.replyWithPhoto(
-        session.preview.value, {
+        new InputFile(session.preview.value), {
           parse_mode : "HTML",
           reply_markup: launchInlineKeyboard,
           caption : textOutput
@@ -458,27 +478,28 @@ async function showInformationAboutProjectOwner(
   }</b>\n\n🔹 🌐 Web & Social Links\n🌍 Official Website: ${
     poolData.websiteURL
       ? "  ----website: <b>" + poolData.websiteURL + "</b>\n"
-      : ""
+      : "\n"
   }🐦 Twitter: ${
     poolData.twitterURL
       ? "  ----twitter: <b>" + poolData.twitterURL + "</b>\n"
-      : ""
+      : "\n"
   }📡 Telegram: ${
     poolData.telegramURL
       ? "  ----telegram: <b>" + poolData.telegramURL + "</b>\n"
-      : ""
+      : "\n"
   }📘 Facebook: ${
     poolData.facebookURL
       ? "  ----facebook: <b>" + poolData.facebookURL + "</b>\n"
-      : ""
+      : "\n"
   }🎮 Discord: ${
     poolData.discordURL
       ? "  ----discord: <b>" + poolData.discordURL + "</b>\n"
-      : ""
+      : "\n"
   }`;
   let sentMessageId;
   if (poolData.preview !== undefined && poolData.preview !== "") {
-    sentMessageId = await ctx.replyWithPhoto(poolData.preview, {
+    const imageBuffer = Buffer.from(poolData.preview, 'base64');
+    sentMessageId = await ctx.replyWithPhoto(new InputFile(imageBuffer), {
       reply_markup: replyInlineKeyboard,
       parse_mode: "HTML",
       caption: outPutText,

@@ -44,7 +44,7 @@ const providerURL = {
   Ethereum: "https://goerli.infura.io/v3/81f1f856e5854cda96f939fe2a658c40",
 };
 
-const { Bot, InlineKeyboard, session } = require("grammy");
+const { Bot, InlineKeyboard, InputFile, session } = require("grammy");
 const { Menu } = require("@grammyjs/menu");
 const mongoose = require("mongoose");
 const { parse } = require("dotenv");
@@ -106,6 +106,11 @@ const contributionDataSchema = new Schema({
   claimed: Boolean,
 });
 
+const savedPresaleSchema = new Schema({
+  userWallet: String,
+  poolAddress: String,
+});
+
 const ownerInfoSchema = new Schema({
   ownerUsername: String,
   ownerWallets: [String],
@@ -122,6 +127,7 @@ const ContributionInfo = mongoose.model(
   "ContributionInfo",
   contributionDataSchema
 );
+const SavedPresaleInfo = mongoose.model("SavedPresale", savedPresaleSchema);
 
 const bot = new Bot(process.env.BOT_TOKEN);
 
@@ -1006,7 +1012,8 @@ async function initiateOwnerMenu(submenu, menuData, stackedMenus) {
                   undefined
                 );
                 console.log("review", sentMessageId);
-                session.today_messages.push(sentMessageId.message_id);
+                if(sentMessageId !== undefined)
+                  session.today_messages.push(sentMessageId.message_id);
               } else if ("variable" in item) {
                 const session = getSession(ctx.from.id);
                 session.isExpectingAnswer = "";
@@ -1053,7 +1060,7 @@ async function initiateOwnerMenu(submenu, menuData, stackedMenus) {
                       session.stucked_messages.push(sentMessageId.message_id);
                     } else {
                       if (session.wallets.length !== 0) {
-                        let showValue = item.variable === "preview" ? "Set" : session[item.variable].value;
+                        let showValue = item.variable === "preview" ? " " : session[item.variable].value;
                         if (showValue === undefined || showValue === "")
                           showValue = "<b>Not Set</b>";
                         else if (item.variable === "sellAmount") {
@@ -1072,7 +1079,7 @@ async function initiateOwnerMenu(submenu, menuData, stackedMenus) {
                           );
                         }
                         if(item.variable === "preview" && session.preview.value !== undefined) {
-                          sentMessageId = await ctx.replyWithPhoto(session.preview.value, 
+                          sentMessageId = await ctx.replyWithPhoto(new InputFile(session.preview.value), 
                             {reply_markup : 
                               {force_reply : true}, 
                               parse_mode : 'HTML', 
@@ -1615,6 +1622,57 @@ async function initiateOwnerMenu(submenu, menuData, stackedMenus) {
                       session.today_messages.push(sentMessageId.message_id);
                     })
                     .catch((err) => console.log(err));
+                } else if (item.name === "saved-presales"){
+                  try{
+                    const session = getSession(ctx.from.id);
+                    SavedPresaleInfo.find({
+                      userWallet : new RegExp("^" + getCurrentWalletPublicKey(session) + "$", "i")
+                    }).then(async savedPresales => {
+                      console.log("saved presale", savedPresales);
+                      const inlineKeyboardSavedPresale = new InlineKeyboard();
+                      let presaleCount = 0;
+                      for(const savedPresale of savedPresales) {
+                        const poolAddress = savedPresale.poolAddress;
+                        await PoolInfo.findOne({poolAddress : new RegExp(
+                          "^" + poolAddress + "$", "i"
+                        )}).then(async pool => {
+                          const timestampInSeconds = Math.floor(
+                            Date.now() / 1000
+                          );
+                          let presaleType = "";
+                          if(timestampInSeconds > pool.startTime && 
+                            timestampInSeconds < pool.endTime){
+                              presaleType = "live"
+                            } else if(timestampInSeconds <= pool.startTime) {
+                              presaleType = "upcoming"
+                            } else if(timestampInSeconds >= pool.endTime) {
+                              presaleType = "ended"
+                            }
+                          inlineKeyboardSavedPresale.text(`${pool.token_name} - ${pool.accepted_currency} (${presaleType})`, 
+                          `${presaleType}${pool.chain}${pool.poolAddress}`);
+                          presaleCount ++;
+                          if(presaleCount % 2 == 0){
+                            inlineKeyboardSavedPresale.row();
+                          }
+                        }).catch(err => {
+                          console.log(err);
+                        })
+                      }
+                      if(presaleCount % 2 != 0){
+                        inlineKeyboardSavedPresale.row();
+                      }
+                      inlineKeyboardSavedPresale.text('⬅️ Go back', 'returnToUserMenu');
+                      inlineKeyboardSavedPresale.text(`Return`, 'return');
+                      if(presaleCount > 0){
+                        sentMessageId = await ctx.reply('Your saved presales', {reply_markup : inlineKeyboardSavedPresale});
+                      } else {
+                        sentMessageId = await ctx.reply('⚠️ No saved presale');
+                      }
+                      session.today_messages.push(sentMessageId.message_id);
+                    }).catch(err => {console.log(err)})
+                  } catch(err){
+                    console.log(err);
+                  }
                 } else if (item.name === "create-wallet") {
                   try {
                     // Generate a new Ethereum wallet
@@ -1953,9 +2011,10 @@ async function launchPool(ctx, privateKey, session, username) {
       .approve(factoryAddress[session.chain.value], session.token_supply.value)
       .send({ from: sender });
     await removeAllMessages(ctx, -1);
+    const transactionLinkHead = session.chain.value === "Binance" ? "https://testnet.bscscan.com/tx/" : "https://goerli.etherscan.io/tx/";
 
     sentMessageId = await ctx.reply(
-      `Approving successful! Transaction hash is ${result.transactionHash}\nUnder progressing of fairlaunch creation!!!\n Please wait for a while!!!!\n`
+      `Approving successful! Transaction link is ${transactionLinkHead}${result.transactionHash}\nUnder progressing of fairlaunch creation!!!\n Please wait for a while!!!!\n`
     );
     session.today_messages.push(sentMessageId.message_id);
     console.log("result", result);
@@ -2063,7 +2122,7 @@ async function launchPool(ctx, privateKey, session, username) {
               githubURL: session.githubURL.value,
               instagramURL: session.instagramURL.value,
               redditURL: session.redditURL.value,
-              preview: session.preview.value,
+              preview: session.preview.value === undefined || session.preview.value === "" ? session.preview.value : session.preview.value.toString('base64'),
               description: session.description.value,
             });
             newPoolInfo
@@ -2580,6 +2639,10 @@ async function mainFunc() {
                         text: "Emergency Withdraw",
                         callback_data: `EW_${pool.poolAddress}`,
                       });
+                      inlineKeyboards.inline_keyboard.push([{
+                        text: "Save To Favorite ❤️",
+                        callback_data: `savePresale_${pool.poolAddress}`
+                      }])
                       inlineKeyboards.inline_keyboard.push([
                         {
                           text: "⬅️ Go back",
@@ -2902,7 +2965,8 @@ async function mainFunc() {
               );
             }
           } else {
-            ctx.reply('Upload a photo for preview!');
+            sentMessageId = await ctx.reply('Upload a photo for preview!');
+            session.today_messages.push(sentMessageId.message_id);
           }
         } else {
           sentMessageId = await ctx.reply("Send /start to see the menu");
@@ -3168,6 +3232,7 @@ async function mainFunc() {
               session.today_messages.push(sentMessageId.message_id);
             });
         }
+      } else if (data.startsWith("ended")) {
       } else if (data.startsWith("ownerUpcoming")) {
         let poolChain;
         let startString = "ownerUpcomingEthereum";
@@ -3991,6 +4056,35 @@ async function mainFunc() {
         } else{
           console.log("Wrong address inputed");
         }
+      } else if (data.startsWith("savePresale_")){
+        const parts = data.split("savePresale_");
+        if(parts.length > 1) {
+          const poolAddress = parts[1];
+          const session = getSession(ctx.from.id);
+          SavedPresaleInfo.findOne({
+            userWallet : new RegExp("^" + getCurrentWalletPublicKey(session) + "$", "i"),
+            poolAddress : new RegExp("^" + poolAddress + "$", "i")
+          }).then(async savedPresale => {
+            if(savedPresale === null || savedPresale === undefined) {
+              const newSavedPresale = new SavedPresaleInfo({
+                userWallet : getCurrentWalletPublicKey(session),
+                poolAddress : poolAddress
+              });
+              newSavedPresale.save().then(async (doc) => {
+                console.log(`✅ Added to Favorite`);
+                sentMessageId = await ctx.reply(`✅ Added to Favorite`);
+                session.today_messages.push(sentMessageId.message_id);
+              }).catch(async err => {
+                console.log(err);
+                sentMessageId = await ctx.reply(`⚠️ Failed to add favorite`);
+                session.today_messages.push(sentMessageId.message_id);
+              })
+            }
+          }).catch(async err => {console.log(err);
+            sentMessageId = ctx.reply(`⚠️ Problem with database\nPlease try again later!`);
+            session.today_messages.push(sentMessageId.message_id);
+          });
+        }
       } else if (data === "return") {
         await returnAction(ctx);
       } else if (data === "returnToCreateFairlaunch") {
@@ -4011,11 +4105,26 @@ async function mainFunc() {
         const file = await ctx.api.getFile(photo.file_id);
 
         const fileURL = `https://api.telegram.org/file/bot${bot.token}/${file.file_path}`;
-          session[session.isExpectingAnswer].value = photo.file_id;
-          session.current_menu.update();
-          console.log(session.preview.value);
-          session.isExpectingAnswer = "";
+        const response = await fetch(fileURL);
+        const imageBuffer = await response.buffer();
           await removeAllMessages(ctx, 0);
+          const previousValue = session[session.isExpectingAnswer].value;
+          session[session.isExpectingAnswer].value = imageBuffer;
+          if(previousValue === undefined || previousValue === ""){
+            const showText = await replyReviewMessage(
+              ctx,
+              session,
+              "information"
+            );
+
+            await ctx.api.editMessageText(
+              ctx.chat.id,
+              session.today_messages[0],
+              showText,
+              { parse_mode: "HTML", reply_markup: presaleInformationMenu }
+            );
+          }
+          session.isExpectingAnswer = "";
       }
     })
   } catch (err) {
